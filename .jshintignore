@@ -1,0 +1,8 @@
+node_modules
+.build
+public/js
+.beans
+.cache
+**/*.marko.js
+**/*.dust.js
+test/static

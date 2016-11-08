@@ -47,7 +47,8 @@ function useTransport(transportFactory, config) {
 
                 var handler = responseHandlers.shift();
                 if (!handler) {
-                    throw new Error('Make sure requestContext.next or responseContext.next is not called multiple times');
+                    console.trace('Make sure requestContext.next or responseContext.next is not called multiple times in the same context by mistake');
+                    return;
                 }
                 // adjust position of request handlers
                 requestNextHandlers.unshift(requestPrevHandlers.pop());
@@ -67,7 +68,7 @@ function useTransport(transportFactory, config) {
                 }
 
                 if (!handler && transportPhase) {
-                    throw new Error('Make sure responseContext.next is called instead of requestContext.next in transport');
+                    return responseContext.next.apply(responseContext, arguments);
                 }
 
                 // add callback

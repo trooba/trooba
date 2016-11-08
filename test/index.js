@@ -4,7 +4,7 @@ var Assert = require('assert');
 var _ = require('lodash');
 var Trooba = require('..');
 
-describe.only(__filename, function () {
+describe(__filename, function () {
     it('should create transport from factory function', function () {
         var client = Trooba.transport(function () {
             return function tr(requestContext, responseContext) {
@@ -244,55 +244,64 @@ describe.only(__filename, function () {
         });
     });
 
-    it('should run a chain and fail due to wrong call in transport', function (done) {
-        Assert.throws(function () {
-            Trooba.transport(function (config) {
-                return function tr(requestContext, responseContext) {
-                    requestContext.request.tra = 'asd';
-                    requestContext.next(null, requestContext.request);
-                };
-            })
-            .use(function factory() {
-                return function handler(requestContext, responseContext) {
-                    requestContext.request.fa1 = 'zx1';
-                    requestContext.next();
-                };
-            })
-            .use(function factory() {
-                return function handler(requestContext, responseContext) {
-                    requestContext.request.fa2 = 'zx2';
-                    requestContext.next();
-                };
-            })
-            .create()({
+    it('should handle requestContext.next in transport by switching it to responseContext.next implicitly', function (done) {
+        Trooba.transport(function (config) {
+            return function tr(requestContext, responseContext) {
+                requestContext.request.tra = 'asd';
+                requestContext.next(null, requestContext.request);
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, responseContext) {
+                requestContext.request.fa1 = 'zx1';
+                requestContext.next();
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, responseContext) {
+                requestContext.request.fa2 = 'zx2';
+                requestContext.next();
+            };
+        })
+        .create()({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.deepEqual({
+                tra: 'asd',
+                fa1: 'zx1',
+                fa2: 'zx2',
                 foo: 'bar'
-            }, function validateResponse(err, response) {
-            });
-        }, /Make sure responseContext\.next is called instead of requestContext\.next in transport/);
-        done();
+            }, response);
+            done();
+        });
+
     });
 
     it('should run a chain and fail due to double of responseContext.next', function (done) {
-        Assert.throws(function () {
-            Trooba.transport(function (config) {
-                return function tr(requestContext, responseContext) {
-                    requestContext.request.tra = 'asd';
-                    responseContext.next(null, requestContext.request);
-                };
-            })
-            .use(function factory() {
-                return function handler(requestContext, responseContext) {
-                    requestContext.request.fa2 = 'zx2';
-                    requestContext.next();
-                    requestContext.next();
-                };
-            })
-            .create()({
+        Trooba.transport(function (config) {
+            return function tr(requestContext, responseContext) {
+                requestContext.request.tra = 'asd';
+                responseContext.next(null, requestContext.request);
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, responseContext) {
+                requestContext.request.fa2 = 'zx2';
+                requestContext.next();
+                requestContext.next();
+            };
+        })
+        .create()({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.deepEqual({
+                tra: 'asd',
+                fa2: 'zx2',
                 foo: 'bar'
-            }, function validateResponse(err, response) {
-            });
-        }, /Make sure requestContext\.next or responseContext\.next is not called multiple times/);
-        done();
+            }, response);
+            done();
+
+        });
     });
 
     it('should keep handlers order', function (done) {

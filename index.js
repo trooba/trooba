@@ -1,7 +1,6 @@
 'use strict';
 
-var _ = require('lodash');
-
+var Utils = require('./lib/utils');
 /**
  * This is a generic API free from any proprietery code. TODO: open-source
 */
@@ -30,7 +29,7 @@ function useTransport(transportFactory, config) {
             var responseHandlers = [];
 
             var requestContext = context ?
-                _.clone(context) : {};
+                Utils.clone(context) : {};
 
             var responseContext = {};
             var contextUse = 0;
@@ -47,7 +46,7 @@ function useTransport(transportFactory, config) {
 
                 var handler = responseHandlers.shift();
                 if (!handler) {
-                    console.trace('Make sure requestContext.next or responseContext.next is not called multiple times in the same context by mistake');
+                    console.trace('[WARN] Make sure requestContext.next or responseContext.next is not called multiple times in the same context by mistake');
                     return;
                 }
                 // adjust position of request handlers

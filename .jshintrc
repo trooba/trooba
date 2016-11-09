@@ -4,7 +4,6 @@
     // Maximum errors before stopping.
     "maxerr": 100,
 
-
     // Predefined globals
 
     // Whether the standard browser globals should be predefined.

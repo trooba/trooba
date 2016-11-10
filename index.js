@@ -51,7 +51,7 @@ function useTransport(transportFactory, config) {
                 }
                 // adjust position of request handlers
                 requestNextHandlers.unshift(requestPrevHandlers.pop());
-                handler();
+                handler(err, response);
             };
 
             var transportPhase = false;

@@ -581,4 +581,35 @@ describe(__filename, function () {
 
     });
 
+    it('should handle mock trasport', function (done) {
+        function factory() {
+            var tra = function tra(requestContext, responseContext) {
+                responseContext.next(null, {
+                    qaz: 'wer'
+                });
+            };
+
+            tra.api = function api(requestContext, responseContext) {
+                return {
+                    request: function (req, callback) {
+                        requestContext.request = req;
+                        requestContext.next(callback);
+                    }
+                };
+            };
+
+            return tra;
+        }
+
+        var client = Trooba.transport(factory).create();
+
+        client.request({
+            foo: 'bar'
+        }, function (err, res) {
+            Assert.deepEqual({qaz: 'wer'}, res);
+            done();
+        });
+
+    });
+
 });

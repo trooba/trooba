@@ -115,6 +115,22 @@ describe(__filename, function () {
         });
     });
 
+    it('should handle error from responseContext', function (done) {
+        Trooba.transport(function (config) {
+            return function tr(requestContext, responseContext) {
+                responseContext.error = new Error('Test Error');
+                responseContext.next();
+            };
+        }).create()({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.ok(err);
+            Assert.equal('Test Error', err.message);
+            Assert.ok(!response);
+            done();
+        });
+    });
+
     it('should call handler', function (done) {
         Trooba.transport(function (config) {
             return function tr(requestContext, responseContext) {

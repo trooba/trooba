@@ -40,7 +40,7 @@ function useTransport(transportFactory, config) {
             };
 
             responseContext.next = function next(err, response) {
-                responseContext.error = err === undefined ? responseHandlers.error : err;
+                responseContext.error = err === undefined ? responseContext.error : err;
                 responseContext.response = response ? response : responseContext.response;
                 transportPhase = false;
 

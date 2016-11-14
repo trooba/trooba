@@ -50,11 +50,6 @@ function useTransport(transportFactory, config) {
                     return;
                 }
 
-                // adjust position of request handlers
-                var nextHandler = requestPrevHandlers.pop();
-                if (nextHandler) {
-                    requestNextHandlers.unshift(nextHandler);
-                }
                 handler(responseContext.error, responseContext.response);
             };
 
@@ -62,9 +57,6 @@ function useTransport(transportFactory, config) {
 
             requestContext.next = function next(callback) {
                 var handler = requestNextHandlers.shift();
-                if (handler) {
-                    requestPrevHandlers.push(handler);
-                }
 
                 if (!handler && !transportPhase) {
                     handler = transport;
@@ -75,11 +67,19 @@ function useTransport(transportFactory, config) {
                     return responseContext.next.apply(responseContext, arguments);
                 }
 
-                if (callback) {
-                    responseHandlers.unshift(callback);
+                if (!callback && responseHandlers.length) {
+                    callback = responseContext.next;
                 }
-                else if (responseHandlers.length) {
-                    responseHandlers.unshift(responseContext.next);
+
+                if (callback) {
+                    responseHandlers.unshift(function onCallback() {
+                        // adjust current execution handler stack
+                        // on return of the result
+                        if (handler) {
+                            requestNextHandlers.unshift(handler);
+                        }
+                        callback.apply(null, arguments);
+                    });
                 }
 
                 handler(requestContext, responseContext);

@@ -432,11 +432,11 @@ describe(__filename, function () {
         .use(function factoryRetry() {
             return function handler(requestContext, responseContext) {
                 requestContext.order.push('zx2-req');
-                requestContext.next(function () {
+                requestContext.next(function onResponse() {
                     requestContext.order.push('zx2-res');
                     if (requestContext.retry-- > 0) {
                         requestContext.order.push('retry');
-                        requestContext.next();
+                        requestContext.next(onResponse);
                         return;
                     }
                     responseContext.next();
@@ -466,7 +466,6 @@ describe(__filename, function () {
                 'zx3-res',
                 'zx2-res',
                 'retry',
-                'zx2-req',
                 'zx3-req',
                 'tr',
                 'zx3-res',
@@ -493,10 +492,10 @@ describe(__filename, function () {
         .use(function factoryRetry() {
             return function handler(requestContext, responseContext) {
                 requestContext.order.push('zx2');
-                requestContext.next(function () {
+                requestContext.next(function onResponse() {
                     if (requestContext.retry-- > 0) {
                         requestContext.order.push('retry');
-                        requestContext.next();
+                        requestContext.next(onResponse);
                         return;
                     }
                     responseContext.next();
@@ -521,11 +520,9 @@ describe(__filename, function () {
                 'zx3',
                 'tr',
                 'retry',
-                'zx2',
                 'zx3',
                 'tr',
                 'retry',
-                'zx2',
                 'zx3',
                 'tr'
             ].toString(), response.toString());

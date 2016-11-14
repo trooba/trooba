@@ -260,6 +260,63 @@ describe(__filename, function () {
         });
     });
 
+    it('should re-execute a chain', function (done) {
+        var request = Trooba.transport(function (config) {
+            return function tr(requestContext, responseContext) {
+                requestContext.request.chain.push('tr');
+                responseContext.next(null, requestContext.request);
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, responseContext) {
+                requestContext.request.chain.push('i1');
+                requestContext.next();
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, responseContext) {
+                requestContext.request.chain.push('i2');
+                requestContext.next();
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, responseContext) {
+                requestContext.request.chain.push('i3');
+                requestContext.next();
+            };
+        })
+        .create();
+
+        request({
+            chain: ['q']
+        }, function validateResponse(err, response) {
+            Assert.ok(!err);
+            Assert.deepEqual([
+                'q',
+                'i1',
+                'i2',
+                'i3',
+                'tr'
+            ], response.chain);
+
+            request({
+                chain: ['q']
+            }, function validateResponse(err, response) {
+                Assert.ok(!err);
+                Assert.deepEqual([
+                    'q',
+                    'i1',
+                    'i2',
+                    'i3',
+                    'tr'
+                ], response.chain);
+                done();
+            });
+
+
+        });
+    });
+
     it('should handle requestContext.next in transport by switching it to responseContext.next implicitly', function (done) {
         Trooba.transport(function (config) {
             return function tr(requestContext, responseContext) {

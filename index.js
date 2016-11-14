@@ -49,8 +49,12 @@ function useTransport(transportFactory, config) {
                     console.trace('[WARN] Make sure requestContext.next or responseContext.next is not called multiple times in the same context by mistake');
                     return;
                 }
+
                 // adjust position of request handlers
-                requestNextHandlers.unshift(requestPrevHandlers.pop());
+                var nextHandler = requestPrevHandlers.pop();
+                if (nextHandler) {
+                    requestNextHandlers.unshift(nextHandler);
+                }
                 handler(responseContext.error, responseContext.response);
             };
 
@@ -61,6 +65,7 @@ function useTransport(transportFactory, config) {
                 if (handler) {
                     requestPrevHandlers.push(handler);
                 }
+
                 if (!handler && !transportPhase) {
                     handler = transport;
                     transportPhase = true;
@@ -70,12 +75,13 @@ function useTransport(transportFactory, config) {
                     return responseContext.next.apply(responseContext, arguments);
                 }
 
-                // add callback
-                responseHandlers.unshift(callback || function noop(err) {
-                    // when handler does not need a response flow, we simulate one
-                    // for the given cycle
-                    responseContext.next(err);
-                });
+                if (callback) {
+                    responseHandlers.unshift(callback);
+                }
+                else if (responseHandlers.length) {
+                    responseHandlers.unshift(responseContext.next);
+                }
+
                 handler(requestContext, responseContext);
             };
 
@@ -85,7 +91,7 @@ function useTransport(transportFactory, config) {
 
             return function generic(request, callback) {
                 requestContext.request = request;
-                requestContext.next(function onResponse() {
+                requestContext.next(function onResponse(err, response) {
                     callback(responseContext.error, responseContext.response);
                 });
             };

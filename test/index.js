@@ -22,8 +22,8 @@ describe(__filename, function () {
         Assert.ok(client.create);
     });
 
-    it('should call transport without context', function (done) {
-        Trooba.transport(function () {
+    it('should call transport without context and expose runtime context', function (done) {
+        var ctx = Trooba.transport(function () {
             return function tr(requestContext, responseContext) {
                 Assert.ok(requestContext);
                 Assert.ok(responseContext);
@@ -45,6 +45,9 @@ describe(__filename, function () {
             }, response);
             done();
         });
+
+        Assert.ok(ctx.requestContext);
+        Assert.ok(ctx.responseContext);
     });
 
     it('should call transport with context', function (done) {
@@ -602,7 +605,7 @@ describe(__filename, function () {
         done();
     });
 
-    it('should call transport API', function () {
+    it('should call transport API and return runtime context', function () {
         function factory() {
             function tr(requestContext, responseContext) {
                 responseContext.next(null,
@@ -636,13 +639,17 @@ describe(__filename, function () {
         }
 
         var client = Trooba.transport(factory).create();
-        client.hello('John', function (err, response) {
+        var ctx1 = client.hello('John', function (err, response) {
             Assert.equal('hello John', response);
         });
+        Assert.ok(ctx1.requestContext);
+        Assert.ok(ctx1.responseContext);
 
-        client.hello('Bob', function (err, response) {
+        var ctx2 = client.hello('Bob', function (err, response) {
             Assert.equal('hello Bob', response);
         });
+        Assert.ok(ctx2.requestContext);
+        Assert.ok(ctx2.responseContext);
 
         client.bye('John', function (err, response) {
             Assert.equal('bye John', response);

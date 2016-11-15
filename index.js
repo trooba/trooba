@@ -100,6 +100,11 @@ function useTransport(transportFactory, config) {
                 };
 
                 callback(requestContext, responseContext);
+
+                return {
+                    requestContext: requestContext,
+                    responseContext: responseContext
+                };
             }
 
         }

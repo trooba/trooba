@@ -45,15 +45,17 @@ describe(__filename, function () {
                 req.end();
             }
 
-            transport.api = function api(requestContext, responseContext) {
+            transport.api = function api(pipe) {
                 return {
                     search: function search(name, callback) {
-                        requestContext.request = {
-                            q: name
-                        };
-                        requestContext.next(function (err, response) {
-                            callback(responseContext.error,
-                                responseContext.response && responseContext.response.body);
+                        return pipe(function ctx(requestContext, responseContext) {
+                            requestContext.request = {
+                                q: name
+                            };
+                            requestContext.next(function (err, response) {
+                                callback(responseContext.error,
+                                    responseContext.response && responseContext.response.body);
+                            });
                         });
                     }
                 };

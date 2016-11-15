@@ -609,20 +609,24 @@ describe(__filename, function () {
                     requestContext.type + ' ' + requestContext.request);
             }
 
-            tr.api = function (requestContext, responseContext) {
+            tr.api = function (pipe) {
                 return {
                     hello: function (name, callback) {
-                        requestContext.request = name;
-                        requestContext.type = 'hello';
-                        requestContext.next(function () {
-                            callback(responseContext.error, responseContext.response);
+                        return pipe(function ctx(requestContext, responseContext) {
+                            requestContext.request = name;
+                            requestContext.type = 'hello';
+                            requestContext.next(function () {
+                                callback(responseContext.error, responseContext.response);
+                            });
                         });
                     },
                     bye: function (name, callback) {
-                        requestContext.request = name;
-                        requestContext.type = 'bye';
-                        requestContext.next(function () {
-                            callback(responseContext.error, responseContext.response);
+                        return pipe(function ctx(requestContext, responseContext) {
+                            requestContext.request = name;
+                            requestContext.type = 'bye';
+                            requestContext.next(function () {
+                                callback(responseContext.error, responseContext.response);
+                            });
                         });
                     }
                 };
@@ -659,11 +663,13 @@ describe(__filename, function () {
                 });
             };
 
-            tra.api = function api(requestContext, responseContext) {
+            tra.api = function api(pipe) {
                 return {
                     request: function (req, callback) {
-                        requestContext.request = req;
-                        requestContext.next(callback);
+                        pipe(function ctx(requestContext, responseContext) {
+                            requestContext.request = req;
+                            requestContext.next(callback);
+                        });
                     }
                 };
             };

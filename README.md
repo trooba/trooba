@@ -106,16 +106,18 @@ function transportFactory(config) {
         req.end();
     }
 
-    transport.api = (requestContext, responseContext) => {
+    transport.api = pipe => {
         return {
             search: (name, callback) => {
-                requestContext.request = {
-                    q: name
-                };
-                requestContext.next((err, response) => {
-                    callback(responseContext.error,
-                        responseContext.response && responseContext.response.body);
-                });
+                pipe((requestContext, responseContext) => {
+                    requestContext.request = {
+                        q: name
+                    };
+                    requestContext.next((err, response) => {
+                        callback(responseContext.error,
+                            responseContext.response && responseContext.response.body);
+                    });
+                })
             }
         };
     };

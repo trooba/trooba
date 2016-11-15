@@ -1,5 +1,7 @@
 # trooba
 
+'Trooba' [tru:ba'] means 'Pipe' in Russian
+
 The module may serve as a base to crete pipeline to handle request/response flow in service or service client.
 
 Features:

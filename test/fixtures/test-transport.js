@@ -1,8 +1,8 @@
 'use strict';
 
 module.exports = function () {
-    return function tr(requestContext, responseContext) {
+    return function tr(requestContext, reply) {
         requestContext.called = true;
-        responseContext.next();
+        reply();
     };
 };

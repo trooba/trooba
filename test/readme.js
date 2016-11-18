@@ -1,3 +1,4 @@
+/*jslint esversion:6 */
 'use strict';
 
 var Assert = require('assert');
@@ -19,7 +20,7 @@ describe(__filename, function () {
             .reply(200, 'some text');
 
         function transportFactory(config) {
-            function transport(requestContext, responseContext) {
+            function transport(requestContext, reply) {
                 var qs = '?' + Querystring.stringify(requestContext.request);
                 var options = {
                     protocol: config.protocol,
@@ -36,23 +37,23 @@ describe(__filename, function () {
                     });
                     res.on('end', function () {
                         res.body = data;
-                        responseContext.next(null, res);
+                        reply(null, res);
                     });
                 });
 
-                req.on('error', responseContext.next);
+                req.on('error', reply);
 
                 req.end();
             }
 
-            transport.api = function api(pipe) {
+            transport.api = pipe => {
                 return {
-                    search: function search(name, callback) {
-                        return pipe(function ctx(requestContext, responseContext) {
+                    search: (name, callback) => {
+                        pipe((requestContext, next) => {
                             requestContext.request = {
                                 q: name
                             };
-                            requestContext.next(function (err, response) {
+                            next(responseContext => {
                                 callback(responseContext.error,
                                     responseContext.response && responseContext.response.body);
                             });
@@ -87,7 +88,7 @@ describe(__filename, function () {
         var Http = require('http');
 
         function transportFactory(config) {
-            return function transport(requestContext, responseContext) {
+            return function transport(requestContext, reply) {
                 var options = Object.create(config);
                 options.path += '?' + Querystring.stringify(requestContext.request);
                 // prepare request
@@ -99,11 +100,11 @@ describe(__filename, function () {
                     });
                     res.on('end', function () {
                         res.body = data;
-                        responseContext.next(null, res);
+                        reply(null, res);
                     });
                 });
 
-                req.on('error', responseContext.next);
+                req.on('error', reply);
 
                 req.end();
             };
@@ -128,18 +129,18 @@ describe(__filename, function () {
     it('retry handler', function (done) {
         var retryCounter = 0;
         function retryFactory(config) {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 // init retry context
                 if (requestContext.retry === undefined) {
                     requestContext.retry = config.retry;
                 }
-                requestContext.next(function () {
+                action.next(function (responseContext) {
                     if (responseContext.error && requestContext.retry-- > 0) {
                         retryCounter++;
-                        requestContext.next();
+                        action.next();
                         return;
                     }
-                    responseContext.next();
+                    action.reply();
                 });
             };
         }
@@ -147,12 +148,12 @@ describe(__filename, function () {
         // mock transport
         function mockTransportFactory(config) {
             var count = 1;
-            return function mock(requestContext, responseContext) {
+            return function mock(requestContext, reply) {
                 // first generate error
                 if (count-- > 0) {
-                    return responseContext.next(new Error('Test error'));
+                    return reply(new Error('Test error'));
                 }
-                responseContext.next(null, 'some text');
+                reply(null, 'some text');
             };
         }
 

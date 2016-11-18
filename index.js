@@ -19,95 +19,117 @@ function useTransport(transportFactory, config) {
 
     return {
         use: function use(handlerFactory, config) {
-            handlers.push(handlerFactory(config));
+            if (typeof handlerFactory === 'string') {
+                handlerFactory = require(handlerFactory);
+            }
+            handlers.unshift(handlerFactory(config));
             return this;
         },
 
         create: function create(context) {
 
+            var pipe = buildPipe(handlers, createPipeHandler(transport));
+
             if (transport.api) {
-                return transport.api(pipe);
+                return transport.api(function injectPipe(next) {
+                    var requestContext = context ?
+                        Utils.clone(context) : {};
+
+                    next(requestContext, function onStartPipe(request, callback) {
+                        var args = [].slice.call(arguments);
+                        callback = args.pop();
+                        requestContext.request = args.pop() || requestContext.request;
+                        // run the pipe
+                        pipe(requestContext, callback);
+                    });
+
+                    return requestContext;
+                });
             }
 
             return function generic(request, callback) {
-                return pipe(function ctx(requestContext, responseContext) {
-                    requestContext.request = request;
-                    requestContext.next(function onResponse(err, response) {
-                        callback(responseContext.error, responseContext.response);
-                    });
-                });
-            };
-
-            function pipe(callback) {
-                var requestNextHandlers = handlers.slice();
-                var responseHandlers = [];
-
                 var requestContext = context ?
                     Utils.clone(context) : {};
 
-                var responseContext = {};
-                var contextUse = 0;
-
-                requestContext.use = function use(handlerFactory, config) {
-                    requestNextHandlers.splice(contextUse++, 0, handlerFactory(config));
-                    return this;
-                };
-
-                responseContext.next = function next(err, response) {
-                    responseContext.error = err === undefined ? responseContext.error : err;
-                    responseContext.response = response ? response : responseContext.response;
-                    transportPhase = false;
-
-                    var handler = responseHandlers.shift();
-                    if (!handler) {
-                        console.trace('[WARN] Make sure requestContext.next or responseContext.next is not called multiple times in the same context by mistake');
-                        return;
-                    }
-
-                    handler(responseContext.error, responseContext.response);
-                };
-
-                var transportPhase = false;
-
-                requestContext.next = function next(callback) {
-                    var handler = requestNextHandlers.shift();
-
-                    if (!handler && !transportPhase) {
-                        handler = transport;
-                        transportPhase = true;
-                    }
-
-                    if (!handler && transportPhase) {
-                        return responseContext.next.apply(responseContext, arguments);
-                    }
-
-                    if (!callback && responseHandlers.length) {
-                        callback = responseContext.next;
-                    }
-
-                    if (callback) {
-                        responseHandlers.unshift(function onCallback() {
-                            // adjust current execution handler stack
-                            // on return of the result
-                            if (handler) {
-                                requestNextHandlers.unshift(handler);
-                            }
-                            callback.apply(null, arguments);
-                        });
-                    }
-
-                    handler(requestContext, responseContext);
-                };
-
-                callback(requestContext, responseContext);
-
-                return {
-                    requestContext: requestContext,
-                    responseContext: responseContext
-                };
-            }
+                requestContext.request = request;
+                pipe(requestContext, function onResponseContext(responseContext) {
+                    callback(responseContext.error, responseContext.response);
+                });
+                return requestContext;
+            };
 
         }
     };
 }
 module.exports.transport = useTransport;
+
+/**
+   The pipe API signature is
+    function pipe(requestContext, action) {
+        // do something before
+        action.next(function onResponse(responseContext) {
+            // do something after
+            action.reply(responseContext);
+        });
+    }
+*/
+function buildPipe(handlers, target) {
+    return handlers.reduce(function reduce(next, handler) {
+        return createPipeHandler(handler, next);
+    }, target);
+}
+module.exports.buildPipe = buildPipe;
+
+function createPipeHandler(handler, next, propagateCtx) {
+    return function handleRequest(requestContext, callback) {
+        requestContext = requestContext || propagateCtx && propagateCtx.requestContext;
+        callback = callback || propagateCtx && propagateCtx.callback;
+
+        handler(requestContext, next ? createAction(requestContext) : genericReply);
+
+        /**
+         * handle 3 cases of callbacks:
+         * - callback(err) - initiate an error response
+         * - callback(null, response) - initiate a response
+         * - callback(responseContext) - propagating context
+        */
+        function genericReply() {
+            if (arguments.length === 2 || arguments[0] instanceof Error) {
+                callback({
+                    error: arguments[0],
+                    response: arguments[1]
+                });
+                return;
+            }
+
+            callback(arguments[0]);
+        }
+
+        function createAction(requestContext) {
+
+            return {
+                /**
+                *  - reply(err, response) converted to responseContext
+                *  - reply(responseContext) propagates responseContext back
+                */
+                reply: genericReply,
+                /**
+                *  - next([requestContext], [onReply])
+                *  - next(requestContext) no reponse to handle
+                *  - next() propagates implicit requestContext forward
+                */
+                next: function handleNext() {
+                    var args = [].slice.call(arguments);
+                    var callback = Utils.selectArg(args, 'function') || this.reply;
+                    var rc = Utils.selectArg(args, 'object') || requestContext;
+                    if (rc instanceof Error) {
+                        callback(rc);
+                        return;
+                    }
+                    next(rc, callback);
+                }
+            };
+        }
+    };
+}
+module.exports.createPipeHandler = createPipeHandler;

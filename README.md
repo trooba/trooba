@@ -45,7 +45,7 @@ It can also provide a custom API that will be exposed as if it was client native
 var Http = require('http');
 
 function transportFactory(config) {
-    return function transport(requestContext, responseContext) {
+    return function transport(requestContext, reply) {
         var options = Object.create(config);
         options.path += '?' + Querystring.stringify(requestContext.request);
         // prepare request
@@ -57,11 +57,11 @@ function transportFactory(config) {
             });
             res.on('end', () => {
                 res.body = data;
-                responseContext.next(null, res);
+                reply(null, res);
             });
         });
 
-        req.on('error', responseContext.next);
+        req.on('error', reply);
 
         req.end();
     };
@@ -82,7 +82,7 @@ request({
 
 ```js
 function transportFactory(config) {
-    function transport(requestContext, responseContext) {
+    function transport(requestContext, reply) {
         const qs = '?' + Querystring.stringify(requestContext.request);
         var options = {
             protocol: config.protocol,
@@ -99,11 +99,11 @@ function transportFactory(config) {
             });
             res.on('end', () => {
                 res.body = data;
-                responseContext.next(null, res);
+                reply(null, res);
             });
         });
 
-        req.on('error', responseContext.next);
+        req.on('error', reply);
 
         req.end();
     }
@@ -111,11 +111,11 @@ function transportFactory(config) {
     transport.api = pipe => {
         return {
             search: (name, callback) => {
-                pipe((requestContext, responseContext) => {
+                pipe((requestContext, next) => {
                     requestContext.request = {
                         q: name
                     };
-                    requestContext.next((err, response) => {
+                    next(responseContext => {
                         callback(responseContext.error,
                             responseContext.response && responseContext.response.body);
                     });
@@ -140,35 +140,60 @@ client.search('nike', (err, response) => console.log);
 
 Each handler should perform a unique function within pipeline, such as error handling, retry logic, tracing.
 
-* Request flow only handler
+##### Request flow only handler
 
 ```js
 function handlerFactory() {
-    return function handler(requestContext, responseContext) {
+    return function handler(requestContext, action) {
         // manipulate request context
         requestContext.request.fa1 = 'zx1';
         // pass control to the next handler in request pipeline
-        requestContext.next();
+        action.next();
     };
 }
 ```
 
-* Request/response flow handler
+##### Request/response flow handler
 
 ```js
 function handlerFactory() {
-    return function handler(requestContext, responseContext) {
+    return function handler(requestContext, action) {
         // manipulate request context
         requestContext.request.fa1 = 'zx1';
         // pass control to the next handler in request pipeline
-        requestContext.next(function onResponseFlow(err) {
+        requestContext.next(function onResponse(responseContext) {
             // do something with responseContext
             // transport can add any value to responseContext
             // err passed is also present as responseContext.error
             // pass control to next handler in response pipeline
-            responseContext.next();
+            action.reply(responseContext);
             // but you can also pass a new one
-            // responseContext.next(new Error('More important error'))
+            // action.reply(new Error('More important error'))
+        });
+    };
+}
+```
+
+##### Reply with error
+
+```js
+function handlerFactory() {
+    return function handler(requestContext, action) {
+        // pass control to the response handler
+        action.end(new Error('Bad reponse'));
+    };
+}
+```
+
+##### Reply with response
+
+```js
+function handlerFactory() {
+    return function handler(requestContext, action) {
+        // pass control to the response handler
+        action.end({
+            statusCode: 200,
+            body: 'Hello world'
         });
     };
 }
@@ -179,18 +204,19 @@ function handlerFactory() {
 ```js
 var Assert = require('assert');
 var Trooba = require('trooba');
+
 function retryFactory(config) {
-    return function handler(requestContext, responseContext) {
+    return function handler(requestContext, action) {
         // init retry context
         if (requestContext.retry === undefined) {
             requestContext.retry = config.retry;
         }
-        requestContext.next(function () {
+        action.next(function onReply(responseContext) {
             if (responseContext.error && requestContext.retry-- > 0) {
-                requestContext.next();
+                action.next(onResponse);
                 return;
             }
-            responseContext.next();
+            action.reply(responseContext);
         });
     };
 }
@@ -198,12 +224,12 @@ function retryFactory(config) {
 // mock transport
 function mockTransportFactory(config) {
     var count = 1;
-    return function mock(requestContext, responseContext) {
+    return function mock(requestContext, action) {
         // first generate error
         if (count-- > 0) {
-            return responseContext.next(new Error('Test error'));
+            return action.reply(new Error('Test error'));
         }
-        responseContext.next(null, 'some text');
+        action.reply(null, 'some text');
     };
 }
 

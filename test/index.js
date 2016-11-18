@@ -7,7 +7,7 @@ var Trooba = require('..');
 describe(__filename, function () {
     it('should create transport from factory function', function () {
         var client = Trooba.transport(function () {
-            return function tr(requestContext, responseContext) {
+            return function tr(requestContext, reply) {
             };
         });
         Assert.ok(client);
@@ -22,16 +22,17 @@ describe(__filename, function () {
         Assert.ok(client.create);
     });
 
-    it('should call transport without context and expose runtime context', function (done) {
-        var ctx = Trooba.transport(function () {
-            return function tr(requestContext, responseContext) {
+    it('should call transport without context', function (done) {
+        Trooba.transport(function () {
+            return function tr(requestContext, reply) {
                 Assert.ok(requestContext);
-                Assert.ok(responseContext);
                 Assert.ok(requestContext.request);
+                Assert.equal('function', typeof reply);
                 Assert.deepEqual({
                     foo: 'bar'
                 }, requestContext.request);
-                responseContext.next(null, {
+
+                reply(null, {
                     qaz: 'qwe'
                 });
             };
@@ -46,22 +47,22 @@ describe(__filename, function () {
             done();
         });
 
-        Assert.ok(ctx.requestContext);
-        Assert.ok(ctx.responseContext);
     });
 
     it('should call transport with context', function (done) {
         Trooba.transport(function () {
-            return function tr(requestContext, responseContext) {
+            return function tr(requestContext, reply) {
                 Assert.ok(requestContext);
-                Assert.ok(responseContext);
                 Assert.ok(requestContext.request);
                 Assert.equal('thy', requestContext.fer);
                 Assert.deepEqual({
                     foo: 'bar'
                 }, requestContext.request);
-                responseContext.next(null, {
-                    qaz: 'qwe'
+
+                reply({
+                    response: {
+                        qaz: 'qwe'
+                    }
                 });
             };
         }).create({
@@ -83,8 +84,8 @@ describe(__filename, function () {
             Assert.deepEqual({
                 asd: 'zxc'
             }, config);
-            return function tr(requestContext, responseContext) {
-                responseContext.next(null, _.assign({
+            return function tr(requestContext, reply) {
+                reply(null, _.assign({
                     qaz: 'qwe'
                 }, config));
             };
@@ -105,8 +106,8 @@ describe(__filename, function () {
 
     it('should handle error', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                responseContext.next(new Error('Test Error'));
+            return function tr(requestContext, reply) {
+                reply(new Error('Test Error'));
             };
         }).create()({
             foo: 'bar'
@@ -120,9 +121,10 @@ describe(__filename, function () {
 
     it('should handle error from responseContext', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                responseContext.error = new Error('Test Error');
-                responseContext.next();
+            return function tr(requestContext, reply) {
+                reply({
+                    error: new Error('Test Error')
+                });
             };
         }).create()({
             foo: 'bar'
@@ -136,14 +138,14 @@ describe(__filename, function () {
 
     it('should call handler', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                responseContext.next(null, requestContext.request);
+            return function tr(requestContext, reply) {
+                reply(null, requestContext.request);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.rvb = 'zxc';
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .create()({
@@ -158,17 +160,36 @@ describe(__filename, function () {
         });
     });
 
+    it('should resolve handler from module reference', function (done) {
+        Trooba.transport(function (config) {
+            return function tr(requestContext, reply) {
+                reply(null, requestContext.request);
+            };
+        })
+        .use(require.resolve('./fixtures/handler'))
+        .create()({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.ok(!err);
+            Assert.deepEqual({
+                test: true,
+                foo: 'bar'
+            }, response);
+            done();
+        });
+
+    });
+
     it('should call handler and return response', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                requestContext.request.rvb = 'zxc';
-                requestContext.next();
+            return function tr(requestContext, reply) {
+                done(new Error('Should not happen'));
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.dfg = 'cvb';
-                responseContext.next(null, requestContext.request);
+                action.reply(null, requestContext.request);
             };
         })
         .create()({
@@ -185,15 +206,14 @@ describe(__filename, function () {
 
     it('should call handler with config', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                requestContext.request.rvb = 'zxc';
-                requestContext.next();
+            return function tr(requestContext, reply) {
+                done(new Error('Should not happen'));
             };
         })
         .use(function factory(config) {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.dfg = config.cfg;
-                responseContext.next(null, requestContext.request);
+                action.reply(null, requestContext.request);
             };
         }, {
             cfg: 'thy'
@@ -212,13 +232,13 @@ describe(__filename, function () {
 
     it('should catch handle error', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
+            return function tr(requestContext, reply) {
                 done(new Error('Should not happen'));
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                responseContext.next(new Error('Test Error'));
+            return function handler(requestContext, action) {
+                action.next(new Error('Test Error'));
             };
         }).create()({
             foo: 'bar'
@@ -232,21 +252,21 @@ describe(__filename, function () {
 
     it('should execute a chain', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
+            return function tr(requestContext, reply) {
                 requestContext.request.tra = 'asd';
-                responseContext.next(null, requestContext.request);
+                reply(null, requestContext.request);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.fa1 = 'zx1';
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.fa2 = 'zx2';
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .create()({
@@ -265,27 +285,27 @@ describe(__filename, function () {
 
     it('should re-execute a chain', function (done) {
         var request = Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
+            return function tr(requestContext, reply) {
                 requestContext.request.chain.push('tr');
-                responseContext.next(null, requestContext.request);
+                reply(null, requestContext.request);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.chain.push('i1');
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.chain.push('i2');
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.chain.push('i3');
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .create();
@@ -320,51 +340,44 @@ describe(__filename, function () {
         });
     });
 
-    it('should handle requestContext.next in transport by switching it to responseContext.next implicitly', function (done) {
+    it('should handle action.next(error) in transport by switching it to reply implicitly', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                requestContext.request.tra = 'asd';
-                requestContext.next(null, requestContext.request);
+            return function tr(requestContext, reply) {
+                done(new Error('should not happen'));
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                requestContext.request.fa1 = 'zx1';
-                requestContext.next();
+            return function handler(requestContext, action) {
+                action.next(new Error('Test'));
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                requestContext.request.fa2 = 'zx2';
-                requestContext.next();
+            return function handler(requestContext, action) {
+                done(new Error('should not happen'));
             };
         })
         .create()({
             foo: 'bar'
         }, function validateResponse(err, response) {
-            Assert.deepEqual({
-                tra: 'asd',
-                fa1: 'zx1',
-                fa2: 'zx2',
-                foo: 'bar'
-            }, response);
+            Assert.deepEqual('Test', err.message);
             done();
         });
 
     });
 
-    it('should run a chain and fail due to double of responseContext.next', function (done) {
+    it('should handle double next (kind of streaming) as two chunks with action.next', function (done) {
+        var count = 0;
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
+            return function tr(requestContext, reply) {
                 requestContext.request.tra = 'asd';
-                responseContext.next(null, requestContext.request);
+                reply(null, requestContext.request);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.request.fa2 = 'zx2';
-                requestContext.next();
-                requestContext.next();
+                action.next(requestContext);
+                action.next(requestContext);
             };
         })
         .create()({
@@ -375,34 +388,37 @@ describe(__filename, function () {
                 fa2: 'zx2',
                 foo: 'bar'
             }, response);
-            done();
+
+            if (count++ > 0) {
+                done();
+            }
 
         });
     });
 
     it('should keep handlers order', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
+            return function tr(requestContext, reply) {
                 requestContext.order.push('tr');
-                responseContext.next(null, requestContext.order);
+                reply(null, requestContext.order);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.order.push('zx1');
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.order.push('zx2');
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
+            return function handler(requestContext, action) {
                 requestContext.order.push('zx3');
-                requestContext.next();
+                action.next(requestContext);
             };
         })
         .create({
@@ -418,48 +434,48 @@ describe(__filename, function () {
 
     it('should go full cycle', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                requestContext.order.push('tr');
-                responseContext.next(null, requestContext.order);
+            return function tr(requestContext, reply) {
+                requestContext.request.order.push('tr');
+                reply(null, requestContext.request);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx1-req');
-                requestContext.next(function () {
-                    requestContext.order.push('zx1-res');
-                    responseContext.next();
+            return function handler(requestContext, action) {
+                requestContext.request.order.push('zx1-req');
+                action.next(requestContext, function (responseContext) {
+                    responseContext.response.order.push('zx1-res');
+                    action.reply(responseContext);
                 });
             };
         })
         .use(function factoryRetry() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx2-req');
-                requestContext.next(function onResponse() {
-                    requestContext.order.push('zx2-res');
+            return function handler(requestContext, action) {
+                requestContext.request.order.push('zx2-req');
+                action.next(requestContext, function onResponse(responseContext) {
+                    responseContext.response.order.push('zx2-res');
                     if (requestContext.retry-- > 0) {
-                        requestContext.order.push('retry');
-                        requestContext.next(onResponse);
+                        requestContext.request.order = responseContext.response.order;
+                        requestContext.request.order.push('retry');
+                        action.next(requestContext, onResponse);
                         return;
                     }
-                    responseContext.next();
+                    action.reply(responseContext);
                 });
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx3-req');
-                requestContext.next(function () {
-                    requestContext.order.push('zx3-res');
-                    responseContext.next();
+            return function handler(requestContext, action) {
+                requestContext.request.order.push('zx3-req');
+                action.next(requestContext, function (responseContext) {
+                    responseContext.response.order.push('zx3-res');
+                    action.reply(responseContext);
                 });
             };
         })
         .create({
-            order: [],
             retry: 1
         })({
-            foo: 'bar'
+            order: []
         }, function validateResponse(err, response) {
             Assert.equal([
                 'zx1-req',
@@ -474,48 +490,48 @@ describe(__filename, function () {
                 'zx3-res',
                 'zx2-res',
                 'zx1-res'
-            ].toString(), response.toString());
+            ].toString(), response.order.toString());
             done();
         });
     });
 
-    it('should keep handlers order with re-try', function (done) {
+    it('should keep handlers order with re-try plus implicit requestContext propagation', function (done) {
         Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                requestContext.order.push('tr');
-                responseContext.next(null, requestContext.order);
+            return function tr(requestContext, reply) {
+                requestContext.request.order.push('tr');
+                reply(null, requestContext.request);
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx1');
-                requestContext.next();
+            return function handler(requestContext, action) {
+                requestContext.request.order.push('zx1');
+                action.next();
             };
         })
         .use(function factoryRetry() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx2');
-                requestContext.next(function onResponse() {
+            return function handler(requestContext, action) {
+                requestContext.request.order.push('zx2');
+                action.next(function onResponse(responseContext) {
                     if (requestContext.retry-- > 0) {
-                        requestContext.order.push('retry');
-                        requestContext.next(onResponse);
+                        responseContext.response.order.push('retry');
+                        requestContext.request.order = responseContext.response.order;
+                        action.next(onResponse);
                         return;
                     }
-                    responseContext.next();
+                    action.reply(responseContext);
                 });
             };
         })
         .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx3');
-                requestContext.next();
+            return function handler(requestContext, action) {
+                requestContext.request.order.push('zx3');
+                action.next();
             };
         })
         .create({
-            order: [],
             retry: 2
         })({
-            foo: 'bar'
+            order: []
         }, function validateResponse(err, response) {
             Assert.equal([
                 'zx1',
@@ -528,64 +544,14 @@ describe(__filename, function () {
                 'retry',
                 'zx3',
                 'tr'
-            ].toString(), response.toString());
-            done();
-        });
-    });
-
-    it('should append handler to the pipe after context and keep the order', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestContext, responseContext) {
-                requestContext.order.push('tr');
-                responseContext.next(null, requestContext.order);
-            };
-        })
-        .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx1');
-                requestContext.next();
-            };
-        })
-        .use(function factoryAppend() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx2');
-
-                requestContext.use(function factory() {
-                    return function handler(requestContext, responseContext) {
-                        requestContext.order.push('zx21');
-                        requestContext.next();
-                    };
-                });
-                requestContext.use(function factory() {
-                    return function handler(requestContext, responseContext) {
-                        requestContext.order.push('zx22');
-                        requestContext.next();
-                    };
-                });
-
-                requestContext.next();
-            };
-        })
-        .use(function factory() {
-            return function handler(requestContext, responseContext) {
-                requestContext.order.push('zx3');
-                requestContext.next();
-            };
-        })
-        .create({
-            order: []
-        })({
-            foo: 'bar'
-        }, function validateResponse(err, response) {
-            Assert.equal(['zx1', 'zx2', 'zx21', 'zx22', 'zx3', 'tr'].toString(),
-                response.toString());
+            ].toString(), response.order.toString());
             done();
         });
     });
 
     it('should expose transport API', function (done) {
         function factory() {
-            function tr(requestContext, responseContext) {
+            function tr(requestContext, reply) {
 
             }
 
@@ -607,27 +573,29 @@ describe(__filename, function () {
 
     it('should call transport API and return runtime context', function () {
         function factory() {
-            function tr(requestContext, responseContext) {
-                responseContext.next(null,
+            function tr(requestContext, reply) {
+                reply(null,
                     requestContext.type + ' ' + requestContext.request);
             }
 
             tr.api = function (pipe) {
                 return {
                     hello: function (name, callback) {
-                        return pipe(function ctx(requestContext, responseContext) {
+                        return pipe(function ctx(requestContext, next) {
                             requestContext.request = name;
                             requestContext.type = 'hello';
-                            requestContext.next(function () {
+
+                            next(function onResponse(responseContext) {
                                 callback(responseContext.error, responseContext.response);
                             });
                         });
                     },
                     bye: function (name, callback) {
-                        return pipe(function ctx(requestContext, responseContext) {
+                        return pipe(function ctx(requestContext, next) {
                             requestContext.request = name;
                             requestContext.type = 'bye';
-                            requestContext.next(function () {
+
+                            next(function onResponse(responseContext) {
                                 callback(responseContext.error, responseContext.response);
                             });
                         });
@@ -642,14 +610,12 @@ describe(__filename, function () {
         var ctx1 = client.hello('John', function (err, response) {
             Assert.equal('hello John', response);
         });
-        Assert.ok(ctx1.requestContext);
-        Assert.ok(ctx1.responseContext);
+        Assert.ok(ctx1.request);
 
         var ctx2 = client.hello('Bob', function (err, response) {
             Assert.equal('hello Bob', response);
         });
-        Assert.ok(ctx2.requestContext);
-        Assert.ok(ctx2.responseContext);
+        Assert.ok(ctx2.request);
 
         client.bye('John', function (err, response) {
             Assert.equal('bye John', response);
@@ -664,8 +630,8 @@ describe(__filename, function () {
 
     it('should handle mock trasport', function (done) {
         function factory() {
-            var tra = function tra(requestContext, responseContext) {
-                responseContext.next(null, {
+            var tra = function tra(requestContext, reply) {
+                reply(null, {
                     qaz: 'wer'
                 });
             };
@@ -673,9 +639,11 @@ describe(__filename, function () {
             tra.api = function api(pipe) {
                 return {
                     request: function (req, callback) {
-                        pipe(function ctx(requestContext, responseContext) {
+                        return pipe(function ctx(requestContext, next) {
                             requestContext.request = req;
-                            requestContext.next(callback);
+                            next(function onResponse(responseContext) {
+                                callback(responseContext.error, responseContext.response);
+                            });
                         });
                     }
                 };

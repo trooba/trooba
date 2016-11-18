@@ -134,6 +134,14 @@ function createPipeHandler(handler, next, propagateCtx) {
                             var reply = self.reply;
                             var implicitResponseContext = responseContext;
                             self.reply = function implicitReply(responseContext) {
+                                // handle the case when error is passed with implicit context
+                                if (arguments.length === 1 &&
+                                    responseContext instanceof Error &&
+                                    implicitResponseContext) {
+
+                                    implicitResponseContext.error = responseContext;
+                                    responseContext = implicitResponseContext;
+                                }
                                 reply(responseContext || implicitResponseContext);
                             };
                         }

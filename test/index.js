@@ -582,6 +582,32 @@ describe(__filename, function () {
         });
     });
 
+    it('should assign error to the implicit context if any', function (done) {
+        Trooba.transport(function (config) {
+            return function tr(requestContext, reply) {
+                reply(null, 'bad content');
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, action) {
+                action.next(function () {
+                    // simulate bad content decoding
+                    action.reply(new Error('Test'));
+                });
+            };
+        })
+        .create({
+            retry: 2
+        })({
+            order: []
+        }, function validateResponse(err, response) {
+            Assert.ok(err);
+            Assert.equal('Test', err.message);
+            Assert.ok(response);
+            done();
+        });
+    });
+
     it('should expose transport API', function (done) {
         function factory() {
             function tr(requestContext, reply) {

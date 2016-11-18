@@ -119,14 +119,29 @@ function createPipeHandler(handler, next, propagateCtx) {
                 *  - next() propagates implicit requestContext forward
                 */
                 next: function handleNext() {
+                    var self = this;
                     var args = [].slice.call(arguments);
-                    var callback = Utils.selectArg(args, 'function') || this.reply;
+                    var callback = Utils.selectArg(args, 'function');
                     var rc = Utils.selectArg(args, 'object') || requestContext;
                     if (rc instanceof Error) {
-                        callback(rc);
+                        (callback || this.reply)(rc);
                         return;
                     }
-                    next(rc, callback);
+
+                    next(rc, function onResponseContext(responseContext) {
+                        if (callback) {
+                            // override reply to allow implicit response context propagation
+                            var reply = self.reply;
+                            var implicitResponseContext = responseContext;
+                            self.reply = function implicitReply(responseContext) {
+                                reply(responseContext || implicitResponseContext);
+                            };
+                        }
+                        else {
+                            callback = self.reply;
+                        }
+                        callback(responseContext);
+                    });
                 }
             };
         }

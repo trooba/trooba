@@ -283,6 +283,39 @@ describe(__filename, function () {
         });
     });
 
+    it('should execute a chain and propagate requestContext implicitly', function (done) {
+        Trooba.transport(function (config) {
+            return function tr(requestContext, reply) {
+                requestContext.request.tra = 'asd';
+                reply(null, requestContext.request);
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, action) {
+                requestContext.request.fa1 = 'zx1';
+                action.next();
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, action) {
+                requestContext.request.fa2 = 'zx2';
+                action.next();
+            };
+        })
+        .create()({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.ok(!err);
+            Assert.deepEqual({
+                foo: 'bar',
+                tra: 'asd',
+                fa1: 'zx1',
+                fa2: 'zx2'
+            }, response);
+            done();
+        });
+    });
+
     it('should re-execute a chain', function (done) {
         var request = Trooba.transport(function (config) {
             return function tr(requestContext, reply) {
@@ -495,7 +528,7 @@ describe(__filename, function () {
         });
     });
 
-    it('should keep handlers order with re-try plus implicit requestContext propagation', function (done) {
+    it('should keep handlers order with re-try plus implicit requestContext/responseContext propagation', function (done) {
         Trooba.transport(function (config) {
             return function tr(requestContext, reply) {
                 requestContext.request.order.push('tr');
@@ -518,7 +551,7 @@ describe(__filename, function () {
                         action.next(onResponse);
                         return;
                     }
-                    action.reply(responseContext);
+                    action.reply();
                 });
             };
         })

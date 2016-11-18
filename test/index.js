@@ -608,6 +608,28 @@ describe(__filename, function () {
         });
     });
 
+    it('should handle empty reply', function (done) {
+        Trooba.transport(function (config) {
+            return function tr(requestContext, reply) {
+                reply();
+            };
+        })
+        .use(function factory() {
+            return function handler(requestContext, action) {
+                action.next();
+            };
+        })
+        .create({
+            retry: 2
+        })({
+            order: []
+        }, function validateResponse(err, response) {
+            Assert.ok(!err);
+            Assert.ok(!response);
+            done();
+        });
+    });
+
     it('should expose transport API', function (done) {
         function factory() {
             function tr(requestContext, reply) {

@@ -53,6 +53,9 @@ function useTransport(transportFactory, config) {
 
                 requestContext.request = request;
                 pipe(requestContext, function onResponseContext(responseContext) {
+                    if (!responseContext) {
+                        return callback();
+                    }
                     callback(responseContext.error, responseContext.response);
                 });
                 return requestContext;
@@ -128,7 +131,9 @@ function createPipeHandler(handler, next, propagateCtx) {
                         return;
                     }
 
-                    next(rc, function onResponseContext(responseContext) {
+                    next(rc, onResponseContext);
+
+                    function onResponseContext(responseContext) {
                         if (callback) {
                             // override reply to allow implicit response context propagation
                             var reply = self.reply;
@@ -149,7 +154,7 @@ function createPipeHandler(handler, next, propagateCtx) {
                             callback = self.reply;
                         }
                         callback(responseContext);
-                    });
+                    }
                 }
             };
         }

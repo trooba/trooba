@@ -136,6 +136,60 @@ var client = Trooba.transport(transportFactory, {
 client.search('nike', (err, response) => console.log);
 ```
 
+#### Custom API via interface
+
+```js
+Trooba.transport(transportFactory, {
+    protocol: 'https:',
+    hostname: 'www.google.com',
+    path: '/search'
+})
+.interface(function api(pipe) {
+    return {
+        search: (name, callback) => {
+            pipe((requestContext, next) => {
+                requestContext.request = {
+                    q: name
+                };
+                next(responseContext => {
+                    callback(responseContext.error,
+                        responseContext.response && responseContext.response.body);
+                });
+            })
+        }
+    }
+})
+.create().search('nike', (err, response) => console.log);
+```
+
+#### Custom API via interface with configuration
+
+```js
+Trooba.transport(transportFactory, {
+    protocol: 'https:',
+    hostname: 'www.google.com',
+    path: '/search'
+})
+.interface(config => {
+    return function api(pipe) {
+        return {
+            search: (name, callback) => {
+                pipe((requestContext, next) => {
+                    requestContext.request = {
+                        q: name
+                    };
+                    next(responseContext => {
+                        callback(responseContext.error,
+                            responseContext.response && responseContext.response.body);
+                    });
+                })
+            }
+        }
+    }
+})
+.create().search('nike', (err, response) => console.log);
+```
+
 ### Handler definition
 
 Each handler should perform a unique function within pipeline, such as error handling, retry logic, tracing.

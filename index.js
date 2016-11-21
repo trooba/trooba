@@ -8,63 +8,105 @@ var Utils = require('./lib/utils');
 /**
  * Assigns transport to the client pipeline
 */
-function useTransport(transportFactory, config) {
-    var handlers = [];
+function Trooba() {
+    this._handlers = [];
+}
 
-    if (typeof transportFactory === 'string') {
-        transportFactory = require(transportFactory);
-    }
+Trooba.prototype = {
+    transport: function transport(transportFactory, config) {
+        if (typeof transportFactory === 'string') {
+            transportFactory = require(transportFactory);
+        }
+        this._transport = transportFactory(config);
+        if (this._transport.api) {
+            this._api = this._transport.api;
+        }
+        return this;
+    },
 
-    var transport = transportFactory(config);
+    use: function use(handlerFactory, config) {
+        if (typeof handlerFactory === 'string') {
+            handlerFactory = require(handlerFactory);
+        }
+        this._handlers.unshift(handlerFactory(config));
+        return this;
+    },
 
-    return {
-        use: function use(handlerFactory, config) {
-            if (typeof handlerFactory === 'string') {
-                handlerFactory = require(handlerFactory);
+    /**
+    * If config parameters is provided, then we assume api to be an API wrapper factory,
+    * otherwise it is considered as an instance of API wrapper
+    */
+    interface: function exposeWithInterface(api, config) {
+        this._api = config ? api(config) : api;
+        return this;
+    },
+
+    create: function create(context) {
+        var self = this;
+
+        var pipe = buildPipe(
+            this._handlers,
+            // allow lazy transport binding via request context
+            createPipeHandler(function proxyTransport(requestContext, reply) {
+                var tr = requestContext.transport;
+                if (!tr) {
+                    throw new Error('Transport is not provided');
+                }
+                tr(requestContext, reply);
             }
-            handlers.unshift(handlerFactory(config));
-            return this;
-        },
+        ));
 
-        create: function create(context) {
-
-            var pipe = buildPipe(handlers, createPipeHandler(transport));
-
-            if (transport.api) {
-                return transport.api(function injectPipe(next) {
-                    var requestContext = context ?
-                        Utils.clone(context) : {};
-
-                    next(requestContext, function onStartPipe(request, callback) {
-                        var args = [].slice.call(arguments);
-                        callback = args.pop();
-                        requestContext.request = args.pop() || requestContext.request;
-                        // run the pipe
-                        pipe(requestContext, callback);
-                    });
-
-                    return requestContext;
-                });
-            }
-
-            return function generic(request, callback) {
+        if (this._api) {
+            return this._api(function injectPipe(next) {
                 var requestContext = context ?
                     Utils.clone(context) : {};
 
-                requestContext.request = request;
-                pipe(requestContext, function onResponseContext(responseContext) {
-                    if (!responseContext) {
-                        return callback();
-                    }
-                    callback(responseContext.error, responseContext.response);
-                });
-                return requestContext;
-            };
+                requestContext.transport = self._transport;
 
+                next(requestContext, function onStartPipe(request, callback) {
+                    var args = [].slice.call(arguments);
+                    callback = args.pop();
+                    requestContext.request = args.pop() || requestContext.request;
+                    // run the pipe
+                    pipe(requestContext, callback);
+                });
+
+                return requestContext;
+            });
         }
-    };
-}
-module.exports.transport = useTransport;
+
+        return function generic(request, callback) {
+            var requestContext = context ?
+                Utils.clone(context) : {};
+
+            requestContext.transport = self._transport;
+            requestContext.request = request;
+            pipe(requestContext, function onResponseContext(responseContext) {
+                if (!responseContext) {
+                    return callback();
+                }
+                callback(responseContext.error, responseContext.response);
+            });
+            return requestContext;
+        };
+
+    }
+};
+
+module.exports.transport = function createWithTransport(transportFactory, config) {
+    var trooba = new Trooba();
+    return trooba.transport(transportFactory, config);
+};
+
+module.exports.use = function createWithHandler(handlerFactory, config) {
+    var trooba = new Trooba();
+    return trooba.use(handlerFactory, config);
+};
+
+module.exports.interface = function createWithInterface(api, config) {
+    var trooba = new Trooba();
+    return trooba.interface(api, config);
+};
 
 /**
    The pipe API signature is

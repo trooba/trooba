@@ -1,6 +1,7 @@
 'use strict';
 
 var Assert = require('assert');
+var NodeUtils = require('util');
 var _ = require('lodash');
 var Trooba = require('..');
 
@@ -22,19 +23,24 @@ describe(__filename, function () {
         Assert.ok(client.create);
     });
 
-    it('should call transport without context', function (done) {
-        Trooba.transport(function () {
-            return function tr(requestContext, reply) {
-                Assert.ok(requestContext);
-                Assert.ok(requestContext.request);
-                Assert.equal('function', typeof reply);
-                Assert.deepEqual({
-                    foo: 'bar'
-                }, requestContext.request);
+    it('should bind transport later via handler', function (done) {
+        // this would allow bootstraping pipeline and transport binding via handler
+        Trooba.use(function injectTransport() {
+            return function inject(requestContext, action) {
+                requestContext.transport = function tr(requestContext, reply) {
+                    Assert.ok(requestContext);
+                    Assert.ok(requestContext.request);
+                    Assert.equal('function', typeof reply);
+                    Assert.deepEqual({
+                        foo: 'bar'
+                    }, requestContext.request);
 
-                reply(null, {
-                    qaz: 'qwe'
-                });
+                    reply(null, {
+                        qaz: 'qwe'
+                    });
+                };
+
+                action.next();
             };
         }).create()({
             foo: 'bar'
@@ -46,7 +52,6 @@ describe(__filename, function () {
             }, response);
             done();
         });
-
     });
 
     it('should call transport with context', function (done) {
@@ -100,6 +105,37 @@ describe(__filename, function () {
                 qaz: 'qwe',
                 asd: 'zxc'
             }, response);
+            done();
+        });
+    });
+
+    it('should pass configuration to the api impl', function (done) {
+        Trooba.transport(function (config) {
+            return function tr(requestContext, reply) {
+                reply(null, NodeUtils.format(requestContext.greeting,
+                    requestContext.request));
+            };
+        })
+        .interface(function apiFactory(config) {
+            return function (pipe) {
+                return {
+                    hello: function (name, callback) {
+                        pipe(function (requestContext, next) {
+                            requestContext.greeting = config.greeting;
+                            next(name, function (responseContext) {
+                                callback(responseContext.error, responseContext.response);
+                            });
+                        });
+                    }
+                };
+            };
+        }, {
+            greeting: 'Hello %s'
+        })
+        .create().hello('John', function validateResponse(err, response) {
+            Assert.ok(!err, err && err.stack);
+            Assert.ok(response);
+            Assert.equal('Hello John', response);
             done();
         });
     });
@@ -652,6 +688,47 @@ describe(__filename, function () {
         done();
     });
 
+    it('should expose transport API via interface', function (done) {
+        function factory() {
+            return function tr(requestContext, reply) {
+
+            };
+        }
+
+        var client = Trooba.interface(function () {
+            return {
+                hello: function () {},
+                bye: function () {}
+            };
+        }).transport(factory).create();
+        Assert.ok(client.hello);
+        Assert.ok(client.bye);
+        done();
+    });
+
+    it('should expose transport API with config via interface', function (done) {
+        function factory() {
+            return function tr(requestContext, reply) {
+
+            };
+        }
+
+        var client = Trooba.interface(function (config) {
+            return function api(pipe) {
+                Assert.equal('bar', config.foo);
+                return {
+                    hello: function () {},
+                    bye: function () {}
+                };
+            };
+        }, {
+            foo: 'bar'
+        }).transport(factory).create();
+        Assert.ok(client.hello);
+        Assert.ok(client.bye);
+        done();
+    });
+
     it('should call transport API and return runtime context', function () {
         function factory() {
             function tr(requestContext, reply) {
@@ -705,9 +782,65 @@ describe(__filename, function () {
         client.bye('Bob', function (err, response) {
             Assert.equal('bye Bob', response);
         });
+    });
+
+    it('should setup transport API via interface, do call and return runtime context', function () {
+        function factory() {
+            function tr(requestContext, reply) {
+                reply(null,
+                    requestContext.type + ' ' + requestContext.request);
+            }
+
+            return tr;
+        }
+
+        function api(pipe) {
+            return {
+                hello: function (name, callback) {
+                    return pipe(function ctx(requestContext, next) {
+                        requestContext.request = name;
+                        requestContext.type = 'hello';
+
+                        next(function onResponse(responseContext) {
+                            callback(responseContext.error, responseContext.response);
+                        });
+                    });
+                },
+                bye: function (name, callback) {
+                    return pipe(function ctx(requestContext, next) {
+                        requestContext.request = name;
+                        requestContext.type = 'bye';
+
+                        next(function onResponse(responseContext) {
+                            callback(responseContext.error, responseContext.response);
+                        });
+                    });
+                }
+            };
+        }
+
+        var client = Trooba.transport(factory).interface(api).create();
+        var ctx1 = client.hello('John', function (err, response) {
+            Assert.equal('hello John', response);
+        });
+        Assert.ok(ctx1.request);
+
+        var ctx2 = client.hello('Bob', function (err, response) {
+            Assert.equal('hello Bob', response);
+        });
+        Assert.ok(ctx2.request);
+
+        client.bye('John', function (err, response) {
+            Assert.equal('bye John', response);
+        });
+
+        client.bye('Bob', function (err, response) {
+            Assert.equal('bye Bob', response);
+        });
 
 
     });
+
 
     it('should handle mock trasport', function (done) {
         function factory() {

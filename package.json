@@ -29,6 +29,7 @@
   },
   "homepage": "https://github.com/dimichgh/trooba#readme",
   "devDependencies": {
+    "lodash": "^4.17.2",
     "mocha": "^3.1.2",
     "nock": "^9.0.2"
   }

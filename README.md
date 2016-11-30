@@ -4,9 +4,12 @@
 
 The module may serve as a base to crete pipeline to handle request/response flow in service or service client.
 
-Features:
-* Define transport with customizable API
-* Define pipeline of handlers executed in request and response flow according to the order they are added.
+![pipeline flow](./docs/images/architecture.png)
+
+Allows to
+* Define a transport
+* Define an API for the client
+* Define a pipeline of handlers executed in request and response flow according to the order they are added.
 
 ## Install
 

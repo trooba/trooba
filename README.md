@@ -43,6 +43,10 @@ request({   // request parameters
 Transport should provide an actual call using specific protocol like http/grpc/soap/rest that should be implemented by the transport provider.
 It can also provide a custom API that will be exposed as if it was client native.
 
+Transport accepts accepts two parameters:
+* **requestContext** holds all contextual information as well as request object
+* **reply** is a function([responseContext]|([err], [response])) used to initiate response flow.
+
 #### Use-cases
 
 ```js
@@ -231,7 +235,14 @@ Trooba.transport(transportFactory, {
 
 ### Handler definition
 
-Each handler should perform a unique function within pipeline, such as error handling, retry logic, tracing.
+Each handler should perform a unique function within a pipeline, such as error handling, retry logic, tracing.
+
+The handler accepts two parameters:
+
+* **requestContext** holds all contextual information as well as request object
+* **action** is an object that provides two actions:
+    * action.**next**([requestContext], [callback(responseContext)]) passes control to the next handler in the request pipeline
+    * action.**reply**([responseContext]|([err], [response])) passes control to the next handler in the response pipeline
 
 ##### Request flow only handler
 

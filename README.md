@@ -23,8 +23,8 @@ npm install trooba --save
 var Trooba = require('trooba');
 
 var client = Trooba.transport(myTransportFactory) // setting transport or you can use module reference
-    .use(traceFactory)  // adding handler to trace the calls
-    .use(retryFactory); // retry logic
+    .use(trace)  // adding handler to trace the calls
+    .use(retry, 2); // retry 2 times
 
 var request = client.create({  // injecting context
     foo: bar   
@@ -304,8 +304,80 @@ request({}, (err, response) => {
 
 ### Ajax client
 
-### RESTful client with custom API
+Based on [trooba-xhr-transport](https://github.com/trooba/trooba-xhr-transport)
+
+```js
+var xhrTransportFactory = require('trooba-xhr-transport');
+require('trooba')
+    .transport(xhrTransportFactory, {
+        protocol: 'http:',
+        hostname: 'myapi.service.xyz'
+        socketTimeout: 1000
+    })
+    .create()
+    .get({
+        q: 'nike'
+    })
+    .set('some', 'header')
+    .end(function (err, response) {
+        console.log(err, response && response.body)
+    });
+```
+
+### RESTful client
+
+Based on [trooba-http-transport](https://github.com/trooba/trooba-http-transport)
+
+```js
+require('trooba')
+    .transport(httpTransportFactory, {
+        protocol: 'http:',
+        hostname: 'www.google.com',
+        connectTimeout: 100,
+        socketTimeout: 1000
+    })
+    .create()
+    .get({
+        q: 'nike'
+    })
+    .set('some', 'header')
+    .end(function (err, response) {
+        console.log(err, response && response.body)
+    });
+```
 
 ### gRPC client
 
+Based on [trooba-grpc-transport](https://github.com/trooba/trooba-grpc-transport)
+
+```js
+var grpcTransportFactory = require('trooba-grpc-transport');
+
+require('trooba')
+    .transport(grpcTransportFactory, {
+        protocol: 'http:',
+        hostname: 'grpc.service.my',
+        port: 50001,
+        proto: require.resolve('path/to/hello.proto')
+    })
+    .create()
+    .hello('Bob', function (err, response) {
+        console.log(err, response)
+    });
+```
+
 ### Mocking
+
+```js
+var request = require('trooba')
+    .transport(function mockFactory() {
+        return mock(requestContext, reply) {
+            reply(new Error('Simulate error'));
+        }
+    })
+    .create();
+
+request({foo:'bar'}, function (err, response) {
+    console.log(err, response)
+});
+```

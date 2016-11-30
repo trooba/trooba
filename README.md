@@ -43,6 +43,41 @@ request({   // request parameters
 Transport should provide an actual call using specific protocol like http/grpc/soap/rest that should be implemented by the transport provider.
 It can also provide a custom API that will be exposed as if it was client native.
 
+#### Use-cases
+
+```js
+// response with error that would end up at responseContext.error
+function transportFactory(config) {
+    return function transport(requestContext, reply) {
+        reply(new Error('Error'));
+    };
+}
+
+// or with response that would end up at responseContext.response
+function transportFactory(config) {
+    return function transport(requestContext, reply) {
+        reply(null, {
+            statusCode: 200,
+            body: 'ok'
+        })
+    };
+}
+
+// or using explicit responseContext context creation
+function transportFactory(config) {
+    return function transport(requestContext, reply) {
+        var responseContext = {
+            request: {
+                statusCode: 200,
+                body: 'ok'
+            },
+            foo: bar
+        }
+        reply(responseContext);
+    };
+}
+```
+
 #### Transport definition using http protocol as a base
 ```js
 var Http = require('http');
@@ -111,6 +146,7 @@ function transportFactory(config) {
         req.end();
     }
 
+    // custom API
     transport.api = pipe => {
         return {
             search: (name, callback) => {
@@ -237,7 +273,7 @@ function handlerFactory() {
 function handlerFactory() {
     return function handler(requestContext, action) {
         // pass control to the response handler
-        action.end(new Error('Bad reponse'));
+        action.reply(new Error('Bad reponse'));
     };
 }
 ```
@@ -248,10 +284,41 @@ function handlerFactory() {
 function handlerFactory() {
     return function handler(requestContext, action) {
         // pass control to the response handler
-        action.end({
+        action.reply(null, {
             statusCode: 200,
             body: 'Hello world'
         });
+    };
+}
+```
+
+##### Continue an existing response flow
+
+```js
+function handlerFactory() {
+    return function handler(requestContext, action) {
+        // pass control to the next handler in request pipeline
+        requestContext.next(function onResponse(responseContext) {
+            // update response context
+            responseContext.foo = 'bar';
+            // or response
+            responseContext.response.body = JSON.parse(responseContext.response.body);
+            // continue response flow
+            action.reply();
+        });
+    };
+}
+```
+
+##### Continue an existing request flow
+
+```js
+function handlerFactory() {
+    return function handler(requestContext, action) {
+        requestContext.foo = 'bar';
+        requestContext.request.body = JSON.stringify(requestContext.request.body);
+        // pass control to the next handler in request pipeline
+        requestContext.next();
     };
 }
 ```

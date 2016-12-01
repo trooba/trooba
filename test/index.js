@@ -120,11 +120,12 @@ describe(__filename, function () {
             return function (pipe) {
                 return {
                     hello: function (name, callback) {
-                        pipe(function (requestContext, next) {
-                            requestContext.greeting = config.greeting;
-                            next(name, function (responseContext) {
-                                callback(responseContext.error, responseContext.response);
-                            });
+                        var requestContext = {
+                            greeting: config.greeting,
+                            request: name
+                        };
+                        pipe(requestContext, function (responseContext) {
+                            callback(responseContext.error, responseContext.response);
                         });
                     }
                 };
@@ -739,23 +740,19 @@ describe(__filename, function () {
             tr.api = function (pipe) {
                 return {
                     hello: function (name, callback) {
-                        return pipe(function ctx(requestContext, next) {
-                            requestContext.request = name;
-                            requestContext.type = 'hello';
-
-                            next(function onResponse(responseContext) {
-                                callback(responseContext.error, responseContext.response);
-                            });
+                        return pipe({
+                            request: name,
+                            type: 'hello'
+                        }, function onResponse(responseContext) {
+                            callback(responseContext.error, responseContext.response);
                         });
                     },
                     bye: function (name, callback) {
-                        return pipe(function ctx(requestContext, next) {
-                            requestContext.request = name;
-                            requestContext.type = 'bye';
-
-                            next(function onResponse(responseContext) {
-                                callback(responseContext.error, responseContext.response);
-                            });
+                        return pipe({
+                            request: name,
+                            type: 'bye'
+                        }, function onResponse(responseContext) {
+                            callback(responseContext.error, responseContext.response);
                         });
                     }
                 };
@@ -797,23 +794,19 @@ describe(__filename, function () {
         function api(pipe) {
             return {
                 hello: function (name, callback) {
-                    return pipe(function ctx(requestContext, next) {
-                        requestContext.request = name;
-                        requestContext.type = 'hello';
-
-                        next(function onResponse(responseContext) {
-                            callback(responseContext.error, responseContext.response);
-                        });
+                    return pipe({
+                        request: name,
+                        type: 'hello'
+                    }, function onResponse(responseContext) {
+                        callback(responseContext.error, responseContext.response);
                     });
                 },
                 bye: function (name, callback) {
-                    return pipe(function ctx(requestContext, next) {
-                        requestContext.request = name;
-                        requestContext.type = 'bye';
-
-                        next(function onResponse(responseContext) {
-                            callback(responseContext.error, responseContext.response);
-                        });
+                    return pipe({
+                        request: name,
+                        type: 'bye'
+                    }, function onResponse(responseContext) {
+                        callback(responseContext.error, responseContext.response);
                     });
                 }
             };
@@ -853,11 +846,10 @@ describe(__filename, function () {
             tra.api = function api(pipe) {
                 return {
                     request: function (req, callback) {
-                        return pipe(function ctx(requestContext, next) {
-                            requestContext.request = req;
-                            next(function onResponse(responseContext) {
-                                callback(responseContext.error, responseContext.response);
-                            });
+                        return pipe({
+                            request: req
+                        }, function onResponse(responseContext) {
+                            callback(responseContext.error, responseContext.response);
                         });
                     }
                 };

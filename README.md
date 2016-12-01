@@ -6,10 +6,15 @@ The module may serve as a base to create a pipeline to handle request/response f
 
 ![pipeline flow](./docs/images/architecture.png)
 
-Allows to
-* Define a transport
-* Define an API for the client
-* Define a pipeline of handlers executed in request and response flow according to the order they are added.
+Trooba is a stateless generic pipeline that can be used to execute multiple requests or responses/chunks in parallel without any conflicts as the contextual information is passed along with a request and a response object.
+
+Allows to:
+* Hook a transport to a pipeline
+* Define a client API
+* Create a pipeline of handlers
+    * The handlers are executed in order they were added.
+    * The request object is passed from client through a set of handlers before getting to the transport
+    * The response object is passed in the reverse order of handlers from transport to the client.
 
 ## Install
 
@@ -38,10 +43,23 @@ request({   // request parameters
 })
 ```
 
-### Transport definition
+### Trooba API
+
+* **transport**(transportFactory[, config]) is an optional method that hooks the pipeline to the specific transport
+   * *transportFactory* defines a factory to instantiate a transport
+   * *config* is a config object that contains configuration info for the transport
+* **interface**(function implementation(pipe) {}) is an optional method to inject a custom client interface that would be returned by *create* method
+* **use**(handlerFactory[, config]) adds a handler to the pipeline
+   * *handlerFactory* is a factory to instantiate a handler
+   * *config* is a config object for the handler
+* **create**([context]) creates a generic request function or client defined by the transport or via *interface* method. It allows to inject context that would be merged into requestContext object.
+
+### Transport
 
 Transport should provide an actual call using specific protocol like http/grpc/soap/rest that should be implemented by the transport provider.
 It can also provide a custom API that will be exposed as if it was client native.
+
+#### Transport API
 
 Transport accepts accepts two parameters:
 * **requestContext** holds all contextual information as well as request object
@@ -154,14 +172,14 @@ function transportFactory(config) {
     transport.api = pipe => {
         return {
             search: (name, callback) => {
-                pipe((requestContext, next) => {
-                    requestContext.request = {
+                var requestContext = {
+                    request: {
                         q: name
-                    };
-                    next(responseContext => {
-                        callback(responseContext.error,
-                            responseContext.response && responseContext.response.body);
-                    });
+                    }
+                }
+                pipe(requestContext, responseContext => {
+                    callback(responseContext.error,
+                        responseContext.response && responseContext.response.body);
                 })
             }
         };
@@ -179,7 +197,23 @@ var client = Trooba.transport(transportFactory, {
 client.search('nike', (err, response) => console.log);
 ```
 
-#### Custom API via interface
+### Interface
+
+Allows to define a custom client API if the generic request function is not enough.
+
+```js
+Trooba.interface(function implementation(pipe) {});
+```
+
+The interface implementation should be a function that returns a new function or service client object.
+The function is injected with a pipe function(*requestContext*, [function onResponse(*responseContext*)]) that runs the pipeline.
+It allows to configure the requestContext with required information before passing control to the first handler in request flow.
+* *requestContext* is a context object specific to the given request
+* onResponse(*responseContext*) function is invoked for every chunk of data or a single response.
+    * *responseContext* is a response context object that may hold data for a single response or a chunk of the response data in case of streaming response.
+        * responseContext object is defined by a specific transport response flow.
+        * It can be different between chunks or shared based on how the transport defines it.
+        * The transport should define a method to signal the end of the stream, for example it can set a flag in the responseContext or pass undefined instead of responseContext.
 
 ```js
 Trooba.transport(transportFactory, {
@@ -190,14 +224,14 @@ Trooba.transport(transportFactory, {
 .interface(function api(pipe) {
     return {
         search: (name, callback) => {
-            pipe((requestContext, next) => {
-                requestContext.request = {
+            requestContext = {
+                request: {
                     q: name
-                };
-                next(responseContext => {
-                    callback(responseContext.error,
-                        responseContext.response && responseContext.response.body);
-                });
+                }
+            };
+            pipe(requestContext, function onResponse(responseContext) {
+                callback(responseContext.error,
+                    responseContext.response && responseContext.response.body);
             })
         }
     }
@@ -217,14 +251,14 @@ Trooba.transport(transportFactory, {
     return function api(pipe) {
         return {
             search: (name, callback) => {
-                pipe((requestContext, next) => {
-                    requestContext.request = {
+                requestContext = {
+                    request: {
                         q: name
-                    };
-                    next(responseContext => {
-                        callback(responseContext.error,
-                            responseContext.response && responseContext.response.body);
-                    });
+                    }
+                };
+                pipe(requestContext, function onResponse(responseContext) {
+                    callback(responseContext.error,
+                        responseContext.response && responseContext.response.body);
                 })
             }
         }
@@ -241,8 +275,12 @@ The handler accepts two parameters:
 
 * **requestContext** holds all contextual information as well as request object
 * **action** is an object that provides two actions:
-    * action.**next**([requestContext], [callback(responseContext)]) passes control to the next handler in the request pipeline
-    * action.**reply**([responseContext]|([err], [response])) passes control to the next handler in the response pipeline
+    * action.**next**([requestContext], [function (responseContext)]) passes control to the next handler in the request pipeline
+    * action.**reply**([responseContext]|([err], [response])) passes control to the next handler in the response pipeline.
+        * **reply** can work in 2 ways
+            * reply(error, response) as a standard callback that will implicitly create a requestContext if it has not already been created and assign error to responseContext.error and the response to responseContext.reponse field.
+            * reply(responseContext) which can pass the existing responseContext received from action.**next** call or overwritten by a new one.
+
 
 ##### Request flow only handler
 

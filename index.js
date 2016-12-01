@@ -17,6 +17,7 @@ Trooba.prototype = {
         if (typeof transportFactory === 'string') {
             transportFactory = require(transportFactory);
         }
+
         this._transport = transportFactory(config);
         if (this._transport.api) {
             this._api = this._transport.api;
@@ -57,19 +58,17 @@ Trooba.prototype = {
         ));
 
         if (this._api) {
-            return this._api(function injectPipe(next) {
-                var requestContext = context ?
-                    Utils.clone(context) : {};
+            return this._api(function injectPipe(requestContext, reply) {
+
+                if (context) {
+                    Object.keys(context).forEach(function forEach(key) {
+                        requestContext[key] = context[key];
+                    });
+                }
 
                 requestContext.transport = self._transport;
 
-                next(requestContext, function onStartPipe(request, callback) {
-                    var args = [].slice.call(arguments);
-                    callback = args.pop();
-                    requestContext.request = args.pop() || requestContext.request;
-                    // run the pipe
-                    pipe(requestContext, callback);
-                });
+                pipe(requestContext, reply);
 
                 return requestContext;
             });

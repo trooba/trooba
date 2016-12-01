@@ -49,14 +49,13 @@ describe(__filename, function () {
             transport.api = pipe => {
                 return {
                     search: (name, callback) => {
-                        pipe((requestContext, next) => {
-                            requestContext.request = {
+                        pipe({
+                            request: {
                                 q: name
-                            };
-                            next(responseContext => {
-                                callback(responseContext.error,
-                                    responseContext.response && responseContext.response.body);
-                            });
+                            }
+                        }, responseContext => {
+                            callback(responseContext.error,
+                                responseContext.response && responseContext.response.body);
                         });
                     }
                 };

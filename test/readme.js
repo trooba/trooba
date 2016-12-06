@@ -20,8 +20,8 @@ describe(__filename, function () {
             .reply(200, 'some text');
 
         function transportFactory(config) {
-            function transport(requestContext, reply) {
-                var qs = '?' + Querystring.stringify(requestContext.request);
+            function transport(requestPipe) {
+                var qs = '?' + Querystring.stringify(requestPipe.context.request);
                 var options = {
                     protocol: config.protocol,
                     hostname: config.hostname,
@@ -37,11 +37,13 @@ describe(__filename, function () {
                     });
                     res.on('end', function () {
                         res.body = data;
-                        reply(null, res);
+                        requestPipe.reply(res);
                     });
                 });
 
-                req.on('error', reply);
+                req.on('error', function (err) {
+                    requestPipe.throw(err);
+                });
 
                 req.end();
             }
@@ -53,9 +55,12 @@ describe(__filename, function () {
                             request: {
                                 q: name
                             }
-                        }, responseContext => {
-                            callback(responseContext.error,
-                                responseContext.response && responseContext.response.body);
+                        })
+                        .on('error', err => {
+                            callback(err);
+                        })
+                        .on('response', response => {
+                            callback(null, response.body);
                         });
                     }
                 };
@@ -87,9 +92,9 @@ describe(__filename, function () {
         var Http = require('http');
 
         function transportFactory(config) {
-            return function transport(requestContext, reply) {
+            return function transport(requestPipe) {
                 var options = Object.create(config);
-                options.path += '?' + Querystring.stringify(requestContext.request);
+                options.path += '?' + Querystring.stringify(requestPipe.context.request);
                 // prepare request
                 var req = Http.request(options, function (res) {
                     var data = '';
@@ -99,11 +104,13 @@ describe(__filename, function () {
                     });
                     res.on('end', function () {
                         res.body = data;
-                        reply(null, res);
+                        requestPipe.reply(res);
                     });
                 });
 
-                req.on('error', reply);
+                req.on('error', function (err) {
+                    requestPipe.throw(err);
+                });
 
                 req.end();
             };
@@ -128,18 +135,20 @@ describe(__filename, function () {
     it('retry handler', function (done) {
         var retryCounter = 0;
         function retryFactory(config) {
-            return function handler(requestContext, action) {
+            return function handler(requestPipe) {
                 // init retry context
-                if (requestContext.retry === undefined) {
-                    requestContext.retry = config.retry;
+                if (requestPipe.retry === undefined) {
+                    requestPipe.retry = config.retry;
                 }
-                action.next(function (responseContext) {
-                    if (responseContext.error && requestContext.retry-- > 0) {
+
+                requestPipe.next()
+                .on('error', function (err) {
+                    if (requestPipe.retry-- > 0) {
+                        requestPipe.next();
                         retryCounter++;
-                        action.next();
                         return;
                     }
-                    action.reply();
+                    requestPipe.throw(err);
                 });
             };
         }
@@ -147,12 +156,12 @@ describe(__filename, function () {
         // mock transport
         function mockTransportFactory(config) {
             var count = 1;
-            return function mock(requestContext, reply) {
+            return function mock(requestPipe) {
                 // first generate error
                 if (count-- > 0) {
-                    return reply(new Error('Test error'));
+                    return requestPipe.throw(new Error('Test error'));
                 }
-                reply(null, 'some text');
+                requestPipe.reply('some text');
             };
         }
 
@@ -161,7 +170,7 @@ describe(__filename, function () {
             .create();
 
         request({}, function (err, response) {
-            Assert.ok(!err);
+            Assert.ok(!err, err && err.stack);
             Assert.equal('some text', response);
             Assert.equal(1, retryCounter);
             done();

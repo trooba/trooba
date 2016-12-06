@@ -637,6 +637,10 @@ describe(__filename, function () {
 
     });
 
+    it.skip('should not allow hook to the same event in the same handler', function (done) {
+
+    });
+
     it.skip('should handle once error', function (done) {
 
     });

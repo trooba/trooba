@@ -169,6 +169,9 @@ RequestPipe.prototype = {
     },
 
     on: function onEvent$(type, handler) {
+        if (this._eventHandlers[type]) {
+            throw new Error('The hook has already been registered, you can use only one hook for specific event type');
+        }
         this._eventHandlers[type] = handler;
         return this;
     },
@@ -184,45 +187,45 @@ RequestPipe.prototype = {
 
 };
 
-function createPipeResponseHandler(requestProxy) {
-    var reply = requestProxy._prev;
-    if (requestProxy.responseProxy) {
-        // close now obsolete channel
-        requestProxy.responseProxy._next = function noop() {};
+function createPipeResponseHandler(requestPipe) {
+    var prev = requestPipe._prev;
+    if (requestPipe.responsePipe) {
+        // close now obsolete channel as we are going to setup a new one
+        requestPipe.responsePipe._next = function noop() {};
     }
     // when we do next we wipe out the previous response if any
-    requestProxy.responseProxy = undefined;
+    requestPipe.responsePipe = undefined;
 
     return function handlePipeResponseMessage(pipeMessage) {
-        var responseProxy = requestProxy.responseProxy;
-        var handlers = requestProxy &&
-            requestProxy._eventHandlers || {};
+        var responsePipe = requestPipe.responsePipe;
+        var handlers = requestPipe &&
+            requestPipe._eventHandlers || {};
         var handler;
 
         switch(pipeMessage.type) {
             case 'response-context':
-                if (requestProxy.responseProxy &&
-                    requestProxy.responseProxy.context === pipeMessage.ref) {
+                if (requestPipe.responsePipe &&
+                    requestPipe.responsePipe.context === pipeMessage.ref) {
                         throw new Error('The same context has been already received');
                     }
                 // remember for further response events
-                requestProxy.responseProxy =
-                    new ResponsePipe(pipeMessage.ref, reply);
+                requestPipe.responsePipe =
+                    new ResponsePipe(pipeMessage.ref, prev);
 
                 if (handlers.responsePipe) {
-                    handlers.responsePipe(requestProxy.responseProxy);
+                    handlers.responsePipe(requestPipe.responsePipe);
                 }
                 break;
             case 'response':
-                if (responseProxy.responseReceived) {
+                if (responsePipe.responseReceived) {
                     throw new Error('response has already been received, make sure you do not make duplicated reply');
                 }
-                responseProxy.responseReceived = true;
+                responsePipe.responseReceived = true;
 
                 handler = handlers.response;
                 if (handler) {
                     handler(pipeMessage.ref, function onComplete(response) {
-                        reply({
+                        prev({
                             type: pipeMessage.type,
                             ref: response || pipeMessage.ref
                         });
@@ -241,16 +244,16 @@ function createPipeResponseHandler(requestProxy) {
                     // onReply may be called multiple times for single call,
                     // splitting chunk into many chunks
                     handler(data, function onReply() {
-                        if (responseProxy.streamEnd) {
+                        if (responsePipe.streamEnd) {
                             throw new Error('stream has already been closed');
                         }
 
                         if (arguments.length) {
                             data = arguments[0];
-                            if (responseProxy.streamEnd) {
+                            if (responsePipe.streamEnd) {
                                 throw new Error('stream has already been closed');
                             }
-                            responseProxy.streamEnd = true;
+                            responsePipe.streamEnd = true;
                         }
 
                         // handle end of stream if any handler present and end of stream is detected
@@ -258,7 +261,7 @@ function createPipeResponseHandler(requestProxy) {
                             handlers.end;
                         if (handler) {
                             handler(function onComplete() {
-                                reply({
+                                prev({
                                     type: pipeMessage.type,
                                     ref: undefined // undefined data signal end of stream
                                 });
@@ -266,7 +269,7 @@ function createPipeResponseHandler(requestProxy) {
                             return;
                         }
 
-                        reply({
+                        prev({
                             type: pipeMessage.type,
                             ref: data
                         });
@@ -279,7 +282,7 @@ function createPipeResponseHandler(requestProxy) {
                     handlers.end;
                 if (handler) {
                     handler(function onComplete() {
-                        reply({
+                        prev({
                             type: pipeMessage.type,
                             ref: undefined // undefined data signal end of stream
                         });
@@ -296,11 +299,11 @@ function createPipeResponseHandler(requestProxy) {
                             pipeMessage.ref = err;
                         }
 
-                        reply(pipeMessage);
+                        prev(pipeMessage);
                     });
                     return;
                 }
-                else if (requestProxy.reportError) {
+                else if (requestPipe.reportError) {
                     throw pipeMessage.ref;
                 }
                 break;
@@ -312,7 +315,7 @@ function createPipeResponseHandler(requestProxy) {
                         if (arguments.length) {
                             pipeMessage.ref = ref;
                         }
-                        reply(pipeMessage);
+                        prev(pipeMessage);
                     });
                     return;
                 }
@@ -320,7 +323,7 @@ function createPipeResponseHandler(requestProxy) {
         }
 
         // propagate further down response pipe if no handlers
-        reply(pipeMessage);
+        prev(pipeMessage);
     };
 }
 

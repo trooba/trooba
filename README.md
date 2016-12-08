@@ -2,19 +2,19 @@
 
 "Trooba" [tru:ba'] means "Pipe" in Russian
 
-The module may serve as a base to create a pipeline to handle request/response flow in a service or a service client.
+The module may serve as a base to create a pipeline to handle request/response flow at the service and client side.
 
 ![pipeline flow](./docs/images/architecture.png)
 
 Trooba is a stateless generic pipeline that can be used to execute multiple requests or responses/chunks in parallel without any conflicts as the contextual information is passed along with a request and a response object.
 
 Allows to:
-* Hook a transport to a pipeline
-* Define a client API
+* Set a transport (http, soap, grpc, mock or custom) to a pipeline
 * Create a pipeline of handlers
     * The handlers are executed in order they were added.
     * The request object is passed from client through a set of handlers before getting to the transport
     * The response object is passed in the reverse order of handlers from transport to the client.
+* Define a client API; which can be different from what is returned by default.
 
 ## Install
 
@@ -27,32 +27,90 @@ npm install trooba --save
 ```js
 var Trooba = require('trooba');
 
-var client = Trooba.transport(myTransportFactory) // setting transport or you can use module reference
-    .use(trace)  // adding handler to trace the calls
-    .use(retry, 2); // retry 2 times
+var trooba = Trooba
+    // setting transport or you can use module reference
+    .transport(function (pipe) {
+        // hook to request
+        pipe.on('request', function (request) {
+            // respond
+            pipe.respond('Hello ' + request.name);
+        })
+    })
+    // adding handler to collect metrics
+    .use(function (pipe) {
+        var start;
+        pipe.on('request', function (request, next) {
+            start = Date.now();
+            next(); // continue with request
+        })
+        pipe.on('response', function (response, next) {
+            console.log('call time is', Date.now() - start, 'ms');
+            next(); // continue with reponse flow
+        })
+    })  
+    .use(retry, 2); // retry 2 times, see example of retry handler below
 
-var request = client.create({  // injecting context
+// request is re-usable and can be called many times in parallel
+// Make service calls
+// ================================== //
+trooba.create({  // injecting context
     foo: bar   
 })
-
-// Make service calls
-request({   // request parameters
+.request({
     qwe: 'asd'
-}, function (err, response) {
-    console.log(err || response);
 })
+.on('error', console.error)
+.on('response', console.log);
+// ================================== //
+// Or you can do it with callback
+trooba.create({  // injecting context
+    foo: bar   
+})
+.request({
+    qwe: 'asd'
+}, console.log);
+// ================================== //
 ```
 
 ### Trooba API
 
-* **transport**(transportFactory[, config]) is an optional method that hooks the pipeline to the specific transport
-   * *transportFactory* defines a factory to instantiate a transport
+* **transport**(transport[, config]) is an optional method that hooks the pipeline to the specific transport
+   * *transport* is a function (pipe) that defines transport logic
    * *config* is a config object that contains configuration info for the transport
-* **interface**(function implementation(pipe) {}) is an optional method to inject a custom client interface that would be returned by *create* method
-* **use**(handlerFactory[, config]) adds a handler to the pipeline
-   * *handlerFactory* is a factory to instantiate a handler
+* **interface**([function implementation(pipe)]) is an optional method to inject a custom client interface that would be returned by *create* method
+* **use**(handler[, config]) adds a handler to the pipeline
+   * *handler* is a handler function(pipe){}
    * *config* is a config object for the handler
-* **create**([context]) creates a generic request function or client defined by the transport or via *interface* method. It allows to inject context that would be merged into requestContext object.
+* **create**([context]) creates a generic request function or the client object defined by the transport API or via *interface* method. It allows to inject context that would be merged into requestContext object.
+
+### Pipe Object API
+
+The pipe object is passed to all handlers and transport during initialization whenever new context is created via trooba.create(context) or pipe.create(context) call.
+
+#### Methods
+
+* **create**([context]) - creates a pipeline with new context or clones from the existing one if any present. THe method is mandatory to initiate a new request flow, otherwise the subsequent call will fail.
+* **request**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used, it will implicitly call *create* method
+* **throw**(Error) - sends the error down the response pipeline. If no error hooks defined in the pipeline, it will throw error. The method can be called only after the response flow is initiated.
+* **respond**(responseObject) - initiates a response flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated.
+* **send**(message) - sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
+
+#### Message structure
+
+* **type** is a String that defines a message type which can be used in pipe.on() and .once()
+* **flow** is a Number that defines flow type. It will define the direction of the message in the pipeline
+    * 1 - request
+    * 2 - response
+* **ref** is a reference to the data being sent in the message
+* The rest of the fields will be assigned by the framework and should not be changed
+
+```json
+{
+    "type": "error",
+    "flow": 1,
+    "ref": "[Error: some error message]"
+}
+```
 
 ### Transport
 
@@ -61,140 +119,157 @@ It can also provide a custom API that will be exposed as if it was client native
 
 #### Transport API
 
-Transport accepts accepts two parameters:
-* **requestContext** holds all contextual information as well as request object
+Transport accepts two parameters:
+* **pipe** holds a reference to the pipeline; for more info please see definition below.
 * **reply** is a function([responseContext]|([err], [response])) used to initiate response flow.
 
-#### Use-cases
+#### Transport usage
 
 ```js
-// response with error that would end up at responseContext.error
-function transportFactory(config) {
-    return function transport(requestContext, reply) {
-        reply(new Error('Error'));
-    };
+// throw error
+function transport(pipe) {
+    pipe.on('request', function (request) {
+        pipe.throw(new Error('Error'));
+    })
 }
 
-// or with response that would end up at responseContext.response
-function transportFactory(config) {
-    return function transport(requestContext, reply) {
-        reply(null, {
+// reply with http response
+function transport(pipe) {
+    pipe.on('request', function (request) {
+        pipe.respond({
             statusCode: 200,
             body: 'ok'
-        })
-    };
+        });
+    })
 }
 
-// or using explicit responseContext context creation
-function transportFactory(config) {
-    return function transport(requestContext, reply) {
-        var responseContext = {
-            request: {
-                statusCode: 200,
-                body: 'ok'
-            },
-            foo: bar
-        }
-        reply(responseContext);
-    };
+// accessing context information
+function transport(pipe) {
+    // executed only once here for every request
+    console.log('context info:', pipe.context);
+    pipe.on('request', function () {
+        // or here
+        console.log('context info within request flow:', pipe.context);
+        pipe.respond('ok');
+    })
 }
 ```
 
 #### Transport definition using http protocol as a base
+
+For more advanced example please see [trooba-http-transport](https://github.com/trooba/trooba-http-transport) module
+
 ```js
 var Http = require('http');
 
-function transportFactory(config) {
-    return function transport(requestContext, reply) {
+function transport(pipe, config) {
+    pipe.on('request', function (request) {
         var options = Object.create(config);
-        options.path += '?' + Querystring.stringify(requestContext.request);
+        options.path += '?' + Querystring.stringify(request);
         // prepare request
-        var req = Http.request(options, res => {
+        var req = Http.request(options, function (res) {
             var data = '';
             res.setEncoding('utf8');
-            res.on('data', (chunk) => {
+            res.on('data', function (chunk) {
                 data += chunk;
             });
-            res.on('end', () => {
+            res.on('end', function () {
                 res.body = data;
-                reply(null, res);
+                pipe.respond(res);
             });
         });
 
-        req.on('error', reply);
+        req.on('error', function (err) {
+            pipe.throw(err);
+        });
 
         req.end();
-    };
+    });
 }
 
-var request = Trooba.transport(transportFactory, {
+var pipe = Trooba.transport(transportFactory, {
     protocol: 'https:',
     hostname: 'www.google.com',
     path: '/search?q=nike'
 }).create();
 
-request({
+// REQUEST execution
+// ========================================= //
+pipe.request({
     q: 'nike'
 }, (err, response) => console.log);
+
+// or you can skip callback and listen to events
+// ========================================= //
+pipe.request({
+    q: 'nike'
+})
+.on('error', console.error)
+.on('response', console.log);
+// ========================================= //
 ```
 
 #### Transport definition using http protocol and custom API
 
 ```js
-function transportFactory(config) {
-    function transport(requestContext, reply) {
-        const qs = '?' + Querystring.stringify(requestContext.request);
-        var options = {
-            protocol: config.protocol,
-            hostname: config.hostname,
-            path: config.path ?
-                config.path += qs : qs
-        };
-        // prepare request
-        var req = Http.request(options, res => {
-            var data = '';
-            res.setEncoding('utf8');
-            res.on('data', (chunk) => {
-                data += chunk;
+function transportFactory() {
+    function transport(pipe, config) {
+        pipe.on('request', function (request) {
+            var qs = '?' + Querystring.stringify(request);
+            var options = {
+                protocol: config.protocol,
+                hostname: config.hostname,
+                path: config.path ?
+                    config.path += qs : qs
+            };
+            // prepare request
+            var req = Http.request(options, function (res) {
+                var data = '';
+                res.setEncoding('utf8');
+                res.on('data', function (chunk) {
+                    data += chunk;
+                });
+                res.on('end', function () {
+                    res.body = data;
+                    pipe.respond(res);
+                });
             });
-            res.on('end', () => {
-                res.body = data;
-                reply(null, res);
+
+            req.on('error', function (err) {
+                pipe.throw(err);
             });
+
+            req.end();
         });
-
-        req.on('error', reply);
-
-        req.end();
     }
 
-    // custom API
     transport.api = pipe => {
         return {
             search: (name, callback) => {
-                var requestContext = {
-                    request: {
-                        q: name
-                    }
-                }
-                pipe(requestContext, responseContext => {
-                    callback(responseContext.error,
-                        responseContext.response && responseContext.response.body);
+                pipe.create()
+                .on('error', err => {
+                    callback(err);
                 })
+                .on('response', response => {
+                    callback(null, response.body);
+                })
+                .request({
+                    q: name
+                });
             }
         };
     };
 
     return transport;
 }
-// create a client
-var client = Trooba.transport(transportFactory, {
-    protocol: 'https:',
+
+var client = Trooba.transport(transportFactory(), {
+    protocol: 'http:',
     hostname: 'www.google.com',
     path: '/search'
 }).create();
-// call the API
-client.search('nike', (err, response) => console.log);
+
+client.search('nike', console.log);
 ```
 
 ### Interface
@@ -206,17 +281,10 @@ Trooba.interface(function implementation(pipe) {});
 ```
 
 The interface implementation should be a function that returns a new function or service client object.
-The function is injected with a pipe function(*requestContext*, [function onResponse(*responseContext*)]) that runs the pipeline.
-It allows to configure the requestContext with required information before passing control to the first handler in request flow.
-* *requestContext* is a context object specific to the given request
-* onResponse(*responseContext*) function is invoked for every chunk of data or a single response.
-    * *responseContext* is a response context object that may hold data for a single response or a chunk of the response data in case of streaming response.
-        * responseContext object is defined by a specific transport response flow.
-        * It can be different between chunks or shared based on how the transport defines it.
-        * The transport should define a method to signal the end of the stream, for example it can set a flag in the responseContext or pass undefined instead of responseContext.
+The function is injected with a pipe object that allows to [re-]initiate the pipeline flow as well as hook to various events running within the pipeline.
 
 ```js
-Trooba.transport(transportFactory, {
+var client = Trooba.transport(transportFactory, {
     protocol: 'https:',
     hostname: 'www.google.com',
     path: '/search'
@@ -224,45 +292,34 @@ Trooba.transport(transportFactory, {
 .interface(function api(pipe) {
     return {
         search: (name, callback) => {
-            requestContext = {
-                request: {
-                    q: name
-                }
-            };
-            pipe(requestContext, function onResponse(responseContext) {
-                callback(responseContext.error,
-                    responseContext.response && responseContext.response.body);
-            })
+            pipe.create().request( {
+                q: name
+            }, callback);
         }
     }
 })
-.create().search('nike', (err, response) => console.log);
+.create();
+// invoking
+client.search('nike', (err, response) => console.log);
 ```
 
 #### Custom API via interface with configuration
 
 ```js
-Trooba.transport(transportFactory, {
+Trooba.transport(transport, {
     protocol: 'https:',
     hostname: 'www.google.com',
     path: '/search'
 })
-.interface(config => {
-    return function api(pipe) {
-        return {
-            search: (name, callback) => {
-                requestContext = {
-                    request: {
-                        q: name
-                    }
-                };
-                pipe(requestContext, function onResponse(responseContext) {
-                    callback(responseContext.error,
-                        responseContext.response && responseContext.response.body);
-                })
-            }
+.interface(function api(pipe, config) {
+    return {
+        search: (name, callback) => {
+            pipe.create().request( {
+                q: name
+            }, callback);
         }
     }
+}
 })
 .create().search('nike', (err, response) => console.log);
 ```
@@ -271,48 +328,91 @@ Trooba.transport(transportFactory, {
 
 Each handler should perform a unique function within a pipeline, such as error handling, retry logic, tracing.
 
-The handler accepts two parameters:
-
-* **requestContext** holds all contextual information as well as request object
-* **action** is an object that provides two actions:
-    * action.**next**([requestContext], [function (responseContext)]) passes control to the next handler in the request pipeline
-    * action.**reply**([responseContext]|([err], [response])) passes control to the next handler in the response pipeline.
-        * **reply** can work in 2 ways
-            * reply(error, response) as a standard callback that will implicitly create a requestContext if it has not already been created and assign error to responseContext.error and the response to responseContext.reponse field.
-            * reply(responseContext) which can pass the existing responseContext received from action.**next** call or overwritten by a new one.
+The handler has the same signature as the transport, the difference only in what one does with pipe and what events it listens to.
 
 
 ##### Request flow only handler
 
 ```js
-function handlerFactory() {
-    return function handler(requestContext, action) {
-        // manipulate request context
-        requestContext.request.fa1 = 'zx1';
-        // pass control to the next handler in request pipeline
-        action.next();
-    };
+function handler(pipe, config) {
+    // manipulate request context
+    pipe.context.fa1 = 'zx1';
+    // wait for request and pass control back to the pipeline via next()
+    pipe.on('request', function (request, next) {
+        request.foo = 'bar'; // modify request
+        // pass control back to pipeline with the same request
+        next();
+        // or you can re-write the request completely
+        /*
+        next({
+            qaz: 'frt'
+        })
+        */
+    })
+    // wait for response and change it
+    pipe.on('response', function (response, next) {
+        // modifying the response
+        response.wer = 'wer';
+        // pass control back to the pipeline
+        next();
+        // of we can re-write response completely
+        /*
+        next({
+            my: 'new response'
+        })
+        */
+    })
 }
 ```
 
 ##### Request/response flow handler
 
 ```js
-function handlerFactory() {
-    return function handler(requestContext, action) {
-        // manipulate request context
-        requestContext.request.fa1 = 'zx1';
+function handler(pipe) {
+    // manipulate request context
+    pipe.fa1 = 'zx1';
+    var requestObj;
+    pipe.on('request', function (request, next) {
+        // modify request object if needed
+        request.foo = 'bar';
+        // modify shared data
+        requestObj = request;
         // pass control to the next handler in request pipeline
-        requestContext.next(function onResponse(responseContext) {
-            // do something with responseContext
-            // transport can add any value to responseContext
-            // err passed is also present as responseContext.error
-            // pass control to next handler in response pipeline
-            action.reply(responseContext);
-            // but you can also pass a new one
-            // action.reply(new Error('More important error'))
-        });
-    };
+        next();
+        /*
+
+        // you can also stop the flow an respond if needed or throw error
+        pipe.respond('Hi');
+
+        // throw Error
+        pipe.throw(new Error());
+
+        */
+    });
+
+    pipe.on('response', function (response, next) {
+        // modify response object if needed
+        response.body = JSON.parse(response.body);
+        // access context
+        console.log(pipe.context);
+        // pass control down the response flow
+        next();
+
+        /*
+
+        // or replace the response
+        next({
+            my: 'new response'
+        })
+
+        // of you can re-initiate request flow with shared request object
+        pipe.request(requestObj);
+
+        // or throw error
+        pipe.throw(new Error());
+
+        */
+    })
 }
 ```
 
@@ -320,9 +420,11 @@ function handlerFactory() {
 
 ```js
 function handlerFactory() {
-    return function handler(requestContext, action) {
-        // pass control to the response handler
-        action.reply(new Error('Bad reponse'));
+    return function handler(pipe) {
+        pipe.on('request', function (request) {
+            // pass control to the response handler
+            pipe.throw(new Error('Bad response'));
+        })
     };
 }
 ```
@@ -331,29 +433,25 @@ function handlerFactory() {
 
 ```js
 function handlerFactory() {
-    return function handler(requestContext, action) {
-        // pass control to the response handler
-        action.reply(null, {
-            statusCode: 200,
-            body: 'Hello world'
-        });
+    return function handler(pipe) {
+        pipe.on('request', function (request) {
+            // pass control to the response handler
+            pipe.respond({
+                statusCode: 200,
+                body: 'Hello world'
+            });
+        })
     };
 }
 ```
 
-##### Continue an existing response flow
+##### Continue the existing response flow
 
 ```js
 function handlerFactory() {
     return function handler(requestContext, action) {
-        // pass control to the next handler in request pipeline
-        requestContext.next(function onResponse(responseContext) {
-            // update response context
-            responseContext.foo = 'bar';
-            // or response
-            responseContext.response.body = JSON.parse(responseContext.response.body);
-            // continue response flow
-            action.reply();
+        pipe.on('response', function (response, next) {
+            next();
         });
     };
 }
@@ -364,10 +462,9 @@ function handlerFactory() {
 ```js
 function handlerFactory() {
     return function handler(requestContext, action) {
-        requestContext.foo = 'bar';
-        requestContext.request.body = JSON.stringify(requestContext.request.body);
-        // pass control to the next handler in request pipeline
-        requestContext.next();
+        pipe.on('request', function (request, next) {
+            next();
+        })
     };
 }
 ```
@@ -378,20 +475,25 @@ function handlerFactory() {
 var Assert = require('assert');
 var Trooba = require('trooba');
 
-function retryFactory(config) {
-    return function handler(requestContext, action) {
-        // init retry context
-        if (requestContext.retry === undefined) {
-            requestContext.retry = config.retry;
-        }
-        action.next(function onReply(responseContext) {
-            if (responseContext.error && requestContext.retry-- > 0) {
-                action.next(onResponse);
+var retryCounter = 0;
+
+function retry(pipe, config) {
+    pipe.on('request', function (request, next) {
+        var retry = config.retry;
+
+        pipe.on('error', function (err) {
+            if (retry-- > 0) {
+                // re-try request
+                retryCounter++;
+                pipe.request(request);
                 return;
             }
-            action.reply(responseContext);
+            pipe.throw(err);
         });
-    };
+
+        // continue with request flow
+        next();
+    });
 }
 
 // mock transport
@@ -406,13 +508,29 @@ function mockTransportFactory(config) {
     };
 }
 
-var request = Trooba.transport(mockTransportFactory)
-    .use(retryFactory, { retry: 1 })
+// mock transport
+function createMockTransport() {
+    var count = 1;
+    return function mock(pipe) {
+        pipe.on('request', function () {
+            // first generate error
+            if (count-- > 0) {
+                return pipe.throw(new Error('Test error'));
+            }
+            pipe.respond('some text');
+        });
+    };
+}
+
+var client = Trooba.transport(createMockTransport())
+    .use(retry, { retry: 1 })
     .create();
 
-request({}, (err, response) => {
-    Assert.ok(!err);
+client.request({}, function (err, response) {
+    Assert.ok(!err, err && err.stack);
     Assert.equal('some text', response);
+    Assert.equal(1, retryCounter);
+    done();
 });
 ```
 

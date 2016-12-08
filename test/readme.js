@@ -19,48 +19,49 @@ describe(__filename, function () {
             .get('/search?q=nike')
             .reply(200, 'some text');
 
-        function transportFactory(config) {
-            function transport(requestPipe) {
-                var qs = '?' + Querystring.stringify(requestPipe.context.request);
-                var options = {
-                    protocol: config.protocol,
-                    hostname: config.hostname,
-                    path: config.path ?
-                        config.path += qs : qs
-                };
-                // prepare request
-                var req = Http.request(options, function (res) {
-                    var data = '';
-                    res.setEncoding('utf8');
-                    res.on('data', function (chunk) {
-                        data += chunk;
+        function transportFactory() {
+            function transport(pipe, config) {
+                pipe.on('request', function (request) {
+                    var qs = '?' + Querystring.stringify(request);
+                    var options = {
+                        protocol: config.protocol,
+                        hostname: config.hostname,
+                        path: config.path ?
+                            config.path += qs : qs
+                    };
+                    // prepare request
+                    var req = Http.request(options, function (res) {
+                        var data = '';
+                        res.setEncoding('utf8');
+                        res.on('data', function (chunk) {
+                            data += chunk;
+                        });
+                        res.on('end', function () {
+                            res.body = data;
+                            pipe.respond(res);
+                        });
                     });
-                    res.on('end', function () {
-                        res.body = data;
-                        requestPipe.reply(res);
+
+                    req.on('error', function (err) {
+                        pipe.throw(err);
                     });
-                });
 
-                req.on('error', function (err) {
-                    requestPipe.throw(err);
+                    req.end();
                 });
-
-                req.end();
             }
 
             transport.api = pipe => {
                 return {
                     search: (name, callback) => {
-                        pipe({
-                            request: {
-                                q: name
-                            }
-                        })
+                        pipe.create()
                         .on('error', err => {
                             callback(err);
                         })
                         .on('response', response => {
                             callback(null, response.body);
+                        })
+                        .request({
+                            q: name
                         });
                     }
                 };
@@ -69,7 +70,7 @@ describe(__filename, function () {
             return transport;
         }
 
-        var client = Trooba.transport(transportFactory, {
+        var client = Trooba.transport(transportFactory(), {
             protocol: 'http:',
             hostname: 'www.google.com',
             path: '/search'
@@ -84,17 +85,17 @@ describe(__filename, function () {
         });
     });
 
-    it('generic example', function (done) {
+    it('generic example, callback', function (done) {
         var session = nock('http://www.google.com')
             .get('/search?q=nike')
             .reply(200, 'some text');
 
         var Http = require('http');
 
-        function transportFactory(config) {
-            return function transport(requestPipe) {
+        function transport(pipe, config) {
+            pipe.on('request', function (request) {
                 var options = Object.create(config);
-                options.path += '?' + Querystring.stringify(requestPipe.context.request);
+                options.path += '?' + Querystring.stringify(request);
                 // prepare request
                 var req = Http.request(options, function (res) {
                     var data = '';
@@ -104,25 +105,26 @@ describe(__filename, function () {
                     });
                     res.on('end', function () {
                         res.body = data;
-                        requestPipe.reply(res);
+                        pipe.respond(res);
                     });
                 });
 
                 req.on('error', function (err) {
-                    requestPipe.throw(err);
+                    pipe.throw(err);
                 });
 
                 req.end();
-            };
+            });
+
         }
 
-        var request = Trooba.transport(transportFactory, {
+        Trooba.transport(transport, {
             protocol: 'http:',
             hostname: 'www.google.com',
             path: '/search'
-        }).create();
-
-        request({
+        })
+        .create()
+        .request({
             q: 'nike'
         }, function (err, response) {
             session.done();
@@ -132,44 +134,96 @@ describe(__filename, function () {
         });
     });
 
+    it('generic example, listeners', function (done) {
+        var session = nock('http://www.google.com')
+            .get('/search?q=nike')
+            .reply(200, 'some text');
+
+        var Http = require('http');
+
+        function transport(pipe, config) {
+            pipe.on('request', function (request) {
+                var options = Object.create(config);
+                options.path += '?' + Querystring.stringify(request);
+                // prepare request
+                var req = Http.request(options, function (res) {
+                    var data = '';
+                    res.setEncoding('utf8');
+                    res.on('data', function (chunk) {
+                        data += chunk;
+                    });
+                    res.on('end', function () {
+                        res.body = data;
+                        pipe.respond(res);
+                    });
+                });
+
+                req.on('error', function (err) {
+                    pipe.throw(err);
+                });
+
+                req.end();
+            });
+
+        }
+
+        var client = Trooba.transport(transport, {
+            protocol: 'http:',
+            hostname: 'www.google.com',
+            path: '/search'
+        }).create();
+
+        client.request({
+            q: 'nike'
+        })
+        .on('error', done)
+        .on('response', function (response) {
+            session.done();
+            Assert.equal(200, response.statusCode);
+            done();
+        });
+    });
+
     it('retry handler', function (done) {
         var retryCounter = 0;
-        function retryFactory(config) {
-            return function handler(requestPipe) {
-                // init retry context
-                if (requestPipe.retry === undefined) {
-                    requestPipe.retry = config.retry;
-                }
+        function retry(pipe, config) {
+            pipe.on('request', function (request, next) {
+                var retry = config.retry;
 
-                requestPipe.next()
-                .on('error', function (err) {
-                    if (requestPipe.retry-- > 0) {
-                        requestPipe.next();
+                pipe.on('error', function (err) {
+                    if (retry-- > 0) {
+                        // re-try request
                         retryCounter++;
+                        pipe.request(request);
                         return;
                     }
-                    requestPipe.throw(err);
+                    pipe.throw(err);
+                });
+
+                // continue with request flow
+                next();
+            });
+        }
+
+        // mock transport
+        function createMockTransport() {
+            var count = 1;
+            return function mock(pipe) {
+                pipe.on('request', function () {
+                    // first generate error
+                    if (count-- > 0) {
+                        return pipe.throw(new Error('Test error'));
+                    }
+                    pipe.respond('some text');
                 });
             };
         }
 
-        // mock transport
-        function mockTransportFactory(config) {
-            var count = 1;
-            return function mock(requestPipe) {
-                // first generate error
-                if (count-- > 0) {
-                    return requestPipe.throw(new Error('Test error'));
-                }
-                requestPipe.reply('some text');
-            };
-        }
-
-        var request = Trooba.transport(mockTransportFactory)
-            .use(retryFactory, { retry: 1 })
+        var client = Trooba.transport(createMockTransport())
+            .use(retry, { retry: 1 })
             .create();
 
-        request({}, function (err, response) {
+        client.request({}, function (err, response) {
             Assert.ok(!err, err && err.stack);
             Assert.equal('some text', response);
             Assert.equal(1, retryCounter);

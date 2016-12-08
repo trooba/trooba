@@ -14,7 +14,7 @@ Allows to:
     * The handlers are executed in order they were added.
     * The request object is passed from client through a set of handlers before getting to the transport
     * The response object is passed in the reverse order of handlers from transport to the client.
-* Define a client API; which can be different from what is returned by default.
+* Define a client API; which can be different API from what is returned by default.
 
 ## Install
 
@@ -81,7 +81,8 @@ trooba.create({  // injecting context
 * **use**(handler[, config]) adds a handler to the pipeline
    * *handler* is a handler function(pipe){}
    * *config* is a config object for the handler
-* **create**([context]) creates a generic request function or the client object defined by the transport API or via *interface* method. It allows to inject context that would be merged into requestContext object.
+* **create**([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be merged into requestContext object.
+* **service**() is YET TO BE implemented and would create a service for service side of the flow. This calls would return a service object.
 
 ### Pipe Object API
 

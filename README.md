@@ -625,15 +625,12 @@ require('trooba')
 ### Mocking
 
 ```js
-var request = require('trooba')
-    .transport(function mockFactory() {
-        return mock(requestContext, reply) {
-            reply(new Error('Simulate error'));
-        }
+require('trooba')
+    .transport(return mock(pipe) {
+        pipe.on('request', function(request) {
+            pipe.throw(new Error('Simulate error'));
+        });
     })
-    .create();
-
-request({foo:'bar'}, function (err, response) {
-    console.log(err, response)
-});
+    .create()
+    .request({foo:'bar'}, console.log);
 ```

@@ -4,7 +4,7 @@
 
 The module allows to create a pipeline to make service calls as well as handle service requests.
 
-![pipeline flow](./docs/images/arch.png)
+![pipeline flow](./docs/images/arch2.png)
 
 It defines a stateless generic pipeline/bus that can be used to execute multiple requests in parallel without any conflicts. The contextual information is passed along with a request and a response object or other defined or custom events.
 

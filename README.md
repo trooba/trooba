@@ -84,7 +84,7 @@ pipe.create({  // injecting context
 * **use**(handler[, config]) adds a handler to the pipeline
    * *handler* is a function handler(pipe){}
    * *config* is a config object for the handler
-* **create**([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be merged into requestContext object.
+* **create**([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be available to all handlers.
 * **service**() is YET TO BE implemented and would create a service for service side of the flow. This calls would return a service object.
 
 ### Pipe Object API

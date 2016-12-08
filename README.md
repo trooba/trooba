@@ -4,7 +4,7 @@
 
 The module may serve as a base to create a pipeline to handle request/response flow at the service and client side.
 
-![pipeline flow](./docs/images/architecture.png)
+![pipeline flow](./docs/images/arch.png)
 
 Trooba is a stateless generic pipeline that can be used to execute multiple requests or responses/chunks in parallel without any conflicts as the contextual information is passed along with a request and a response object.
 

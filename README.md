@@ -2,19 +2,22 @@
 
 "Trooba" [tru:ba'] means "Pipe" in Russian
 
-The module may serve as a base to create a pipeline to handle request/response flow at the service and client side.
+The module allows to create a pipeline to make service calls as well as handle service requests.
 
 ![pipeline flow](./docs/images/arch.png)
 
-Trooba is a stateless generic pipeline that can be used to execute multiple requests or responses/chunks in parallel without any conflicts as the contextual information is passed along with a request and a response object.
+It defines a stateless generic pipeline/bus that can be used to execute multiple requests in parallel without any conflicts. The contextual information is passed along with a request and a response object or other defined or custom events.
 
 Allows to:
-* Set a transport (http, soap, grpc, mock or custom) to a pipeline
-* Create a pipeline of handlers
-    * The handlers are executed in order they were added.
+* Customize a transport (http, soap, grpc, mock or custom) for a pipeline
+* Define a pipeline of handlers and execute it
+    * The handlers are executed in order they were added through the transport position is determined based on the type of the flow: a service invocation flow or service flow.
+* Define a service client; which can have an API different from what is returned by default.
     * The request object is passed from client through a set of handlers before getting to the transport
     * The response object is passed in the reverse order of handlers from transport to the client.
-* Define a client API; which can be different API from what is returned by default.
+* Define a service:
+    * The request object is passed from transport through a set of handlers before getting back to the transport
+    * The response object is passed in the reversed order from request/response controller defined by the user throw a set of handlers to the transport of the service.
 
 ## Install
 

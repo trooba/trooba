@@ -4,6 +4,7 @@ var Assert = require('assert');
 var Domain = require('domain');
 var NodeUtils = require('util');
 var _ = require('lodash');
+var Async = require('async');
 var Trooba = require('..');
 
 describe(__filename, function () {
@@ -138,7 +139,7 @@ describe(__filename, function () {
                     .on('response', function (response) {
                         callback(undefined, response);
                     })
-                    .request(name).end();
+                    .request(name);
                 }
             };
         }, {
@@ -435,7 +436,7 @@ describe(__filename, function () {
 
     });
 
-    describe.skip('domain', function () {
+    describe('domain', function () {
         after(function () {
             while(process.domain) {
                 process.domain.exit();
@@ -452,7 +453,10 @@ describe(__filename, function () {
                 })
                 .use(function handler(pipe) {
                     pipe.on('request', function () {
-                        pipe.throw(new Error('Test'));
+                        // make it async
+                        setImmediate(function () {
+                            pipe.throw(new Error('Test'));
+                        });
                     });
                 })
                 .use(function handler(pipe) {
@@ -468,6 +472,136 @@ describe(__filename, function () {
                 Assert.equal('Test', err.message);
                 done();
             });
+        });
+
+        it('should preserve domain context in parallel', function (done) {
+            var match = 0;
+            var maxInFlight = 0;
+            function transport(pipe) {
+                pipe.on('request', function (request) {
+                    // simulate async
+                    setTimeout(function () {
+                        if (pipe.context.foo === request.foo) {
+                            match++;
+                        }
+
+                        setTimeout(function () {
+                            pipe.respond({
+                                foo: request.foo,
+                            });
+
+                        }, Math.round(100 * Math.random()));
+                    }, Math.round(100 * Math.random()));
+
+                });
+            }
+
+            function domainInjector(pipe) {
+                pipe.on('request', function (request, next) {
+                    var domain = Domain.create();
+                    domain.run(function () {
+                        process.domain.bar = request.foo;
+                        // simulate async
+                        setTimeout(function () {
+                            pipe.context.foo = request.foo;
+
+                            setTimeout(next, Math.round(100 * Math.random()));
+                        }, Math.round(100 * Math.random()));
+                    });
+                });
+
+                pipe.on('response', function (response, next) {
+                    Assert.ok(process.domain);
+                    Assert.equal(process.domain.bar, response.foo);
+                    next();
+                });
+            }
+
+            function handlerCtxModifier(pipe) {
+                pipe.on('request', function (request, next) {
+                    // simulate async
+                    setTimeout(function () {
+                        pipe.context.foo = request.foo;
+
+                        setTimeout(next, Math.round(100 * Math.random()));
+                    }, Math.round(100 * Math.random()));
+                });
+            }
+
+            var requestCounter = 0;
+            function handlerRequestCounter(pipe) {
+                pipe.on('request', function (request, next) {
+                    maxInFlight = Math.max(maxInFlight, requestCounter);
+                    // simulate async
+                    setTimeout(function () {
+                        requestCounter++;
+
+                        setTimeout(next, Math.round(100 * Math.random()));
+                    }, Math.round(100 * Math.random()));
+                });
+
+                pipe.on('response', function (response, next) {
+                    // simulate async
+                    setTimeout(function () {
+                        requestCounter--;
+
+                        setTimeout(next, Math.round(100 * Math.random()));
+                    }, Math.round(100 * Math.random()));
+                });
+            }
+
+            var pipe = Trooba.transport(transport)
+                .use(domainInjector)
+                .use(handlerCtxModifier)
+                .use(handlerRequestCounter);
+
+            function makeRequest(index, next) {
+                pipe = pipe.create();
+                var request = {
+                    foo: index
+                };
+                pipe.request(request, function (err, response) {
+                    Assert.ok(!err);
+                    Assert.deepEqual(request, response);
+                    next();
+                });
+            }
+
+            Async.times(1000, makeRequest, function (err, results) {
+                Assert.ok(!err);
+                Assert.equal(1000, results.length);
+                Assert.equal(0, requestCounter);
+                console.log('Max in-flight', maxInFlight);
+                done();
+            });
+
+        });
+
+        it('should handle once error and throw error when second one comes', function (done) {
+            var pipe = Trooba.transport(function (pipe) {
+                pipe.once('request', function () {
+                    pipe.throw(new Error('Bad'));
+                    setTimeout(function () {
+                        pipe.throw(new Error('Bad again'));
+                    }, 10);
+                });
+            })
+            .create();
+
+            var domain = Domain.create();
+            domain.run(function () {
+                pipe.request({})
+                .once('error', function (err) {
+                    Object.keys(pipe.context.$points).forEach(function forEach(index) {
+                        Assert.deepEqual({}, pipe.context.$points[index]._messageHandlers);
+                    });
+                });
+            });
+            domain.once('error', function (err) {
+                Assert.equal('Bad again', err.message);
+                done();
+            });
+
         });
     });
 
@@ -540,12 +674,12 @@ describe(__filename, function () {
                     return;
                 }
 
-                var response = pipe.respond(pipe.request);
+                var response = pipe.streamResponse(pipe.request);
                 setImmediate(function () {
-                    response.stream.write('data1');
+                    response.write('data1');
                     setImmediate(function () {
-                        response.stream.write('data2');
-                        response.stream.end();
+                        response.write('data2');
+                        response.end();
                     });
                 });
             });
@@ -642,7 +776,7 @@ describe(__filename, function () {
         Trooba.transport(function tr(pipe) {
             Assert.ok(pipe);
             pipe.on('request', function onRequest(request) {
-                pipe.respond({}).stream.write('data1').write('data2').end();
+                pipe.streamResponse({}).write('data1').write('data2').end();
             });
         })
         .create()
@@ -662,7 +796,7 @@ describe(__filename, function () {
         Trooba.transport(function tr(pipe) {
             Assert.ok(pipe);
             pipe.on('request', function onRequest(request) {
-                pipe.respond({}).stream.end();
+                pipe.streamResponse({}).end();
             });
         })
         .create()
@@ -673,79 +807,457 @@ describe(__filename, function () {
         .request({});
     });
 
-    it.skip('should execute generic API many times in parallel', function (done) {
+    it('should execute generic API many times in parallel', function (done) {
+        var match = 0;
+        var maxInFlight = 0;
+        function transport(pipe) {
+            pipe.on('request', function (request) {
+                // simulate async
+                setTimeout(function () {
+                    if (pipe.context.foo === request.foo) {
+                        match++;
+                    }
+
+                    setTimeout(function () {
+                        pipe.respond({
+                            foo: request.foo,
+                        });
+
+                    }, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+
+            });
+        }
+
+        function handlerCtxModifier(pipe) {
+            pipe.on('request', function (request, next) {
+                // simulate async
+                setTimeout(function () {
+                    pipe.context.foo = request.foo;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+        }
+
+        var requestCounter = 0;
+        function handlerRequestCounter(pipe) {
+            pipe.on('request', function (request, next) {
+                maxInFlight = Math.max(maxInFlight, requestCounter);
+                // simulate async
+                setTimeout(function () {
+                    requestCounter++;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+
+            pipe.on('response', function (response, next) {
+                // simulate async
+                setTimeout(function () {
+                    requestCounter--;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+        }
+
+        var pipe = Trooba.transport(transport)
+            .use(handlerCtxModifier)
+            .use(handlerRequestCounter);
+
+        function makeRequest(index, next) {
+            pipe = pipe.create();
+            var request = {
+                foo: index
+            };
+            pipe.request(request, function (err, response) {
+                Assert.ok(!err);
+                Assert.deepEqual(request, response);
+                next();
+            });
+        }
+
+        Async.times(1000, makeRequest, function (err, results) {
+            Assert.ok(!err);
+            Assert.equal(1000, results.length);
+            Assert.equal(0, requestCounter);
+            console.log('Max in-flight', maxInFlight);
+            done();
+        });
+    });
+
+    it('should execute custom API many times in parallel', function (done) {
+        var match = 0;
+        var maxInFlight = 0;
+        function transport(pipe) {
+            pipe.on('request', function (request) {
+                // simulate async
+                setTimeout(function () {
+                    if (pipe.context.foo === request.foo) {
+                        match++;
+                    }
+
+                    setTimeout(function () {
+                        pipe.respond({
+                            foo: request.foo,
+                        });
+
+                    }, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+
+            });
+        }
+
+        function handlerCtxModifier(pipe) {
+            pipe.on('request', function (request, next) {
+                // simulate async
+                setTimeout(function () {
+                    pipe.context.foo = request.foo;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+        }
+
+        var requestCounter = 0;
+        function handlerRequestCounter(pipe) {
+            pipe.on('request', function (request, next) {
+                maxInFlight = Math.max(maxInFlight, requestCounter);
+                // simulate async
+                setTimeout(function () {
+                    requestCounter++;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+
+            pipe.on('response', function (response, next) {
+                // simulate async
+                setTimeout(function () {
+                    requestCounter--;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+        }
+
+        var client = Trooba.transport(transport)
+            .use(handlerCtxModifier)
+            .use(handlerRequestCounter)
+            .interface(function (pipe) {
+                return {
+                    doRequest: function (index, callback) {
+                        pipe.create().request({
+                            foo: index
+                        }, callback);
+                    }
+                };
+            }).create();
+
+        function makeRequest(index, next) {
+            client.doRequest(index, function (err, response) {
+                Assert.ok(!err);
+                Assert.deepEqual(index, response.foo);
+                next();
+            });
+        }
+
+        Async.times(1000, makeRequest, function (err, results) {
+            Assert.ok(!err);
+            Assert.equal(1000, results.length);
+            Assert.equal(0, requestCounter);
+            console.log('Max in-flight', maxInFlight);
+            done();
+        });
+    });
+
+    it('should fail to write response after response is closed', function (done) {
+        Trooba.transport(function (pipe) {
+            pipe.on('request', function () {
+                var response = pipe.streamResponse({});
+                response.write('foo')
+                    .end();
+
+                Assert.throws(function () {
+                    response.write();
+                }, /The stream has been closed already/);
+            });
+        })
+        .create()
+        .on('response:end', function () {
+            setTimeout(done, 10);
+        })
+        .request({});
 
     });
 
-    it.skip('should execute custom API many times in parallel', function (done) {
+    it('should fail to write request after request is closed', function (done) {
+        var request = Trooba.transport(function (pipe) {
+            pipe.on('request', function () {
+                pipe.respond({});
+            });
+        })
+        .create()
+        .on('response', function () {
+            setTimeout(done, 10);
+        })
+        .streamRequest({});
+
+        request.write('foo')
+            .end();
+
+        Assert.throws(function () {
+            request.write();
+        }, /The stream has been closed already/);
+    });
+
+    it('should inherit context from progenitor point', function (done) {
+        var client = Trooba.transport(function (pipe) {
+            pipe.on('request', function () {
+                pipe.respond(pipe.context.foo + (pipe.context.qaz || ''));
+            });
+        })
+        .create({
+            foo: 'bar'
+        });
+
+        client.request({}, function (err, response) {
+            Assert.equal('bar', response);
+
+            client.create({
+                qaz: 'wsx'
+            }).request({}, function (err, response) {
+                Assert.equal('barwsx', response);
+                done();
+            });
+        });
+    });
+
+    it('should not allow hook to the same event in the same handler', function (done) {
+        var client = Trooba.transport(function (pipe) {
+            pipe.on('request', function () {
+                pipe.respond({});
+            });
+        })
+        .create();
+
+        client.request({}, function () {
+            Assert.throws(function () {
+                client.request({}, function () {
+                });
+            }, /The hook has already been registered, you can use only one hook for specific event type: error/);
+            done();
+        });
+    });
+
+    it('should handle once error and once response', function (done) {
+        var pipe = Trooba.transport(function (pipe) {
+            pipe.once('request', function () {
+                pipe.throw(new Error('Bad'));
+            });
+        })
+        .create();
+        pipe.request({})
+        .once('error', function (err) {
+            Object.keys(pipe.context.$points).forEach(function forEach(index) {
+                Assert.deepEqual({}, pipe.context.$points[index]._messageHandlers);
+            });
+            done();
+        });
+    });
+
+    it('should replace error', function (done) {
+        Trooba.transport(function (pipe) {
+            pipe.once('request', function () {
+                pipe.throw(new Error('Bad'));
+            });
+        })
+        .use(function replace(pipe) {
+            pipe.on('error', function (err, next) {
+                next(new Error('Another bad'));
+            });
+        })
+        .create()
+        .request({})
+        .once('error', function (err) {
+            Assert.equal('Another bad', err.message);
+            done();
+        });
 
     });
 
-    it.skip('should fail to write response after response is closed', function (done) {
+    it('should replace request', function (done) {
+        Trooba.transport(function (pipe) {
+            pipe.once('request', function (request) {
+                pipe.respond(request);
+            });
+        })
+        .use(function replace(pipe) {
+            pipe.once('request', function (request, next) {
+                next('replaced');
+            });
+        })
+        .create()
+        .request('original')
+        .once('response', function (response) {
+            Assert.equal('replaced', response);
+            done();
+        });
 
     });
 
-    it.skip('should fail to write request after request is closed', function (done) {
+    it('should replace response', function (done) {
+        Trooba.transport(function (pipe) {
+            pipe.once('request', function (request) {
+                Assert.equal('original', request);
+                pipe.respond(request);
+            });
+        })
+        .use(function replace(pipe) {
+            pipe.on('response', function (response, next) {
+                next('replaced');
+            });
+        })
+        .create()
+        .request('original')
+        .once('response', function (response) {
+            Assert.equal('replaced', response);
+            done();
+        });
 
     });
 
-    it.skip('should inherit context from progenitor point', function (done) {
+    it('should handle once response', function (done) {
+        var pipe = Trooba.transport(function (pipe) {
+            pipe.once('request', function (request) {
+                Assert.equal('original', request);
+                pipe.respond(request);
+            });
+        })
+        .create()
+        .once('response', function (response) {
+            Object.keys(pipe.context.$points).forEach(function forEach(index) {
+                Assert.deepEqual({}, pipe.context.$points[index]._messageHandlers);
+            });
+            done();
+        });
+        Object.keys(pipe.context.$points).forEach(function forEach(index) {
+            Assert.equal(1, Object.keys(pipe.context.$points[index]._messageHandlers).length);
+        });
+
+        pipe.request('original');
+    });
+
+    it('should send custom message for custom handler', function (done) {
+        Trooba.transport(function (pipe) {
+            pipe.on('custom-request', function (data) {
+                pipe.respond(data+pipe.context.data);
+            });
+        })
+        .use(function replace(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                pipe.context.data = data;
+                next();
+            });
+        })
+        .create()
+        .once('response', function (response) {
+            // Assert.equal('foobar', response);
+            done();
+        })
+        .send({
+            type: 'custom-handle-message',
+            flow: 1,
+            ref: 'bar'
+        })
+        .send({
+            type: 'custom-request',
+            flow: 1,
+            ref: 'foo'
+        });
 
     });
 
-    it.skip('should not allow hook to the same event in the same handler', function (done) {
+    it('should catch only request chunks', function (done) {
+        var pipe = Trooba.transport(function (pipe) {
+            var reqData = [];
+            pipe.on('request:data', function (data, next) {
+                reqData.push(data);
+                next();
+            });
+            pipe.once('request:end', function (data) {
+                pipe.respond(reqData);
+            });
+        })
+        .create()
+        .on('response', function (response) {
+            Assert.deepEqual(['foo', 'bar', undefined], response);
+            done();
+        });
+
+        pipe.streamRequest('request')
+            .write('foo')
+            .write('bar')
+            .end();
 
     });
 
-    it.skip('should handle once error', function (done) {
+    it('should catch only response chunks', function (done) {
+        var pipe = Trooba.transport(function (pipe) {
+            pipe.on('request', function () {
+                pipe.streamResponse('response')
+                    .write('foo')
+                    .write('bar')
+                    .end();
+            });
+        })
+        .create()
+        .on('response', function (response) {
+            Assert.equal('response', response);
+        });
+
+        var reqData = [];
+        pipe.request('request').on('response:data', function (data, next) {
+            reqData.push(data);
+            next();
+        });
+        pipe.once('response:end', function (data) {
+            Assert.deepEqual(['foo', 'bar', undefined], reqData);
+            done();
+        });
 
     });
 
-    it.skip('should handle once error and throw error when second one comes', function (done) {
+    it('should handle error after a few chunks', function (done) {
+        var pipe = Trooba.transport(function (pipe) {
+            pipe.on('request', function () {
+                pipe.streamResponse('response')
+                    .write('foo')
+                    .write('bar');
+                setTimeout(function () {
+                    pipe.throw(new Error('Boom'));
+                }, 10);
+            });
+        })
+        .create()
+        .on('response', function (response) {
+            Assert.equal('response', response);
+        });
 
-    });
-
-    it.skip('should handle once response', function (done) {
-
-    });
-
-    it.skip('should handle once responsePipe', function (done) {
-
-    });
-
-    it.skip('should send custom message for custom handler', function (done) {
-
-    });
-
-    it.skip('should catch only chunks', function (done) {
-
-    });
-
-    it.skip('should handle error after a few chunks', function (done) {
-
-    });
-
-    it.skip('should handle only errors', function (done) {
-
-    });
-
-    it.skip('should handle only responses', function (done) {
-
-    });
-
-    it.skip('should replace response', function (done) {
-
-    });
-
-    it.skip('should replace error', function (done) {
-
-    });
-
-    it.skip('should write chunks to the request stream', function (done) {
-
-    });
-
-    it.skip('should write chunks to the response stream', function (done) {
+        var count = 0;
+        pipe.request('request').on('response:data', function (data, next) {
+            count++;
+            next();
+        });
+        pipe.once('response:end', function (data) {
+            done(new Error('Should never happen'));
+        });
+        pipe.once('error', function (err) {
+            Assert.equal('Boom', err.message);
+            Assert.equal(2, count);
+            done();
+        });
 
     });
 

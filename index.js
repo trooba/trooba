@@ -161,6 +161,8 @@ PipePoint.prototype = {
         else if (message.type === 'error') {
             throw message.ref;
         }
+
+        return this;
     },
 
     process: function process(message) {
@@ -255,6 +257,15 @@ PipePoint.prototype = {
         });
     },
 
+    streamRequest: function streamRequest$(request) {
+        this.context.$requestStream = true;
+        var point = this.request(request);
+        return createWriteStream({
+            channel: point,
+            flow: Types.REQUEST
+        });
+    },
+
     request: function request$(request, callback) {
         var point = this;
         if (!point.context) {
@@ -262,7 +273,7 @@ PipePoint.prototype = {
             point = point.create({});
         }
 
-        function sendReuest() {
+        function sendRequest() {
             point.send({
                 type: 'request',
                 flow: Types.REQUEST,
@@ -275,16 +286,13 @@ PipePoint.prototype = {
             .on('error', callback)
             .on('response', function (res) { callback(null, res); });
 
-            sendReuest();
+            sendRequest();
             return point;
         }
 
-        sendReuest();
+        this.context.$requestStream ? sendRequest() : setTimeout(sendRequest, 0);
 
-        return createWriteStream({
-            channel: point,
-            flow: Types.REQUEST
-        });
+        return point;
     },
 
     respond: function respond$(response) {
@@ -294,8 +302,15 @@ PipePoint.prototype = {
             ref: response
         });
 
+        return this;
+    },
+
+    streamResponse: function streamResponse$(response) {
+        this.context.$responseStream = true;
+        var point = this.respond(response);
+
         return createWriteStream({
-            channel: this,
+            channel: point,
             flow: Types.RESPONSE
         });
     },
@@ -316,8 +331,8 @@ PipePoint.prototype = {
     once: function onceEvent$(type, handler) {
         var self = this;
         this.on(type, function onceFn() {
-            handler.apply(null, arguments);
             delete self.handlers()[type];
+            handler.apply(null, arguments);
         });
         return this;
     },
@@ -355,24 +370,14 @@ function createWriteStream(ctx) {
     }
 
     return {
-        stream: {
-            write: function write$(data) {
-                _write(data);
-                return this;
-            },
-
-            end: function end$() {
-                _write();
-                return channel;
-            }
+        write: function write$(data) {
+            _write(data);
+            return this;
         },
 
-        on: function on() {
-            return ctx.channel.on.apply(ctx.channel, arguments);
-        },
-
-        once: function on() {
-            return ctx.channel.on.apply(ctx.channel, arguments);
+        end: function end$() {
+            _write();
+            return channel;
         }
     };
 }

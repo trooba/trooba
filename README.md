@@ -95,8 +95,14 @@ The pipe object is passed to all handlers and transport during initialization wh
 
 * **create**([context]) - creates a pipeline with new context or clones from the existing one if any present. THe method is mandatory to initiate a new request flow, otherwise the subsequent call will fail.
 * **request**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used, it will implicitly call *create* method
+* **streamRequest**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used. It returns write stream with methods:
+    * **write(data)** write a chunk to the stream as "request:data" message
+    * **end()** ends the stream and send "request:end" message
 * **throw**(Error) - sends the error down the response pipeline. If no error hooks defined in the pipeline, it will throw error. The method can be called only after the response flow is initiated.
 * **respond**(responseObject) - initiates a response flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated.
+* **streamResponse**(responseObject) - initiates a response stream flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated. It returns write stream with methods:
+    * **write(data)** write a chunk to the stream as "response:data" message
+    * **end()** ends the stream and send "response:end" message
 * **send**(message) - sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
 
 #### Service object API
@@ -435,6 +441,34 @@ function handler(pipe) {
 
         */
     })
+}
+```
+
+##### Streaming request flow handler
+
+```js
+function handler(pipe, config) {
+    if (pipe.context.$requestStream) {
+        pipe.on('request:data', function (data, next) {
+            // undefined data means end of stream,
+            data = data ? JSON.stringify(data) : data;
+            next(data);
+        });
+    }
+}
+```
+
+##### Streaming response flow handler
+
+```js
+function handler(pipe, config) {
+    if (pipe.context.$responseStream) {
+        pipe.on('response:data', function (data, next) {
+            // undefined data means end of stream,
+            data = JSON.parse(data);
+            next(data);
+        });
+    }
 }
 ```
 

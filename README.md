@@ -363,7 +363,14 @@ function handler(pipe, config) {
             qaz: 'frt'
         })
         */
-    })
+    });
+}
+```
+
+##### Response flow only handler
+
+```js
+function handler(pipe, config) {
     // wait for response and change it
     pipe.on('response', function (response, next) {
         // modifying the response

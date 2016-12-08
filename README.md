@@ -15,9 +15,9 @@ Allows to:
 * Define a service client; which can have an API different from what is returned by default.
     * The request object is passed from client through a set of handlers before getting to the transport
     * The response object is passed in the reverse order of handlers from transport to the client.
-* Define a service:
-    * The request object is passed from transport through a set of handlers before getting back to the transport
-    * The response object is passed in the reversed order from request/response controller defined by the user throw a set of handlers to the transport of the service.
+* Define a service (yet to be implemented):
+    * The request object is passed from transport through a set of handlers before getting to the controller
+    * The response object is passed in the reversed order from the controller defined by the user through a set of handlers to the transport of the service.
 
 ## Install
 
@@ -30,7 +30,7 @@ npm install trooba --save
 ```js
 var Trooba = require('trooba');
 
-var trooba = Trooba
+var pipe = Trooba
     // setting transport or you can use module reference
     .transport(function (pipe) {
         // hook to request
@@ -56,7 +56,7 @@ var trooba = Trooba
 // request is re-usable and can be called many times in parallel
 // Make service calls
 // ================================== //
-trooba.create({  // injecting context
+pipe.create({  // injecting context
     foo: bar   
 })
 .request({
@@ -66,7 +66,7 @@ trooba.create({  // injecting context
 .on('response', console.log);
 // ================================== //
 // Or you can do it with callback
-trooba.create({  // injecting context
+pipe.create({  // injecting context
     foo: bar   
 })
 .request({
@@ -78,11 +78,11 @@ trooba.create({  // injecting context
 ### Trooba API
 
 * **transport**(transport[, config]) is an optional method that hooks the pipeline to the specific transport
-   * *transport* is a function (pipe) that defines transport logic
-   * *config* is a config object that contains configuration info for the transport
-* **interface**([function implementation(pipe)]) is an optional method to inject a custom client interface that would be returned by *create* method
+   * *transport* is a function (pipe) that defines transport actions based on the protocol (http, grpc, soap)
+   * *config* is an optional config object that has configuration for the transport
+* **interface**([function implementation(pipe)]) is an optional method to inject a custom interface that would be returned by *create* method
 * **use**(handler[, config]) adds a handler to the pipeline
-   * *handler* is a handler function(pipe){}
+   * *handler* is a function handler(pipe){}
    * *config* is a config object for the handler
 * **create**([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be merged into requestContext object.
 * **service**() is YET TO BE implemented and would create a service for service side of the flow. This calls would return a service object.
@@ -91,7 +91,7 @@ trooba.create({  // injecting context
 
 The pipe object is passed to all handlers and transport during initialization whenever new context is created via trooba.create(context) or pipe.create(context) call.
 
-#### Methods
+#### Service invocation API
 
 * **create**([context]) - creates a pipeline with new context or clones from the existing one if any present. THe method is mandatory to initiate a new request flow, otherwise the subsequent call will fail.
 * **request**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used, it will implicitly call *create* method
@@ -99,7 +99,16 @@ The pipe object is passed to all handlers and transport during initialization wh
 * **respond**(responseObject) - initiates a response flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated.
 * **send**(message) - sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
 
-#### Message structure
+#### Service object API
+
+* **listen**([callback]) starts the service on the port provided in transport configuration and returns a reference to the service object that can be used to close the service. The callback is called when the service is fully ready.
+* **close**(force, callback) shuts down the service and returns callback when it is fully closed.
+
+#### Message
+
+The framework defines a message bus to send and receive messages within the pipeline.
+
+The current message structure:
 
 * **type** is a String that defines a message type which can be used in pipe.on() and .once()
 * **flow** is a Number that defines flow type. It will define the direction of the message in the pipeline
@@ -108,6 +117,7 @@ The pipe object is passed to all handlers and transport during initialization wh
 * **ref** is a reference to the data being sent in the message
 * The rest of the fields will be assigned by the framework and should not be changed
 
+Example:
 ```json
 {
     "type": "error",
@@ -118,27 +128,28 @@ The pipe object is passed to all handlers and transport during initialization wh
 
 ### Transport
 
-Transport should provide an actual call using specific protocol like http/grpc/soap/rest that should be implemented by the transport provider.
-It can also provide a custom API that will be exposed as if it was client native.
+Transport should provide an actual implementation of the corresponding protocol (http/grpc/soap/rest) is implemented by the transport provider.
+
+It can also provide a custom API that will be exposed as if it was service/client native API.
 
 #### Transport API
 
 Transport accepts two parameters:
 * **pipe** holds a reference to the pipeline; for more info please see definition below.
-* **reply** is a function([responseContext]|([err], [response])) used to initiate response flow.
+* **config** is an optional object that holds a transport configuration if any.
 
 #### Transport usage
 
 ```js
 // throw error
-function transport(pipe) {
+function transport(pipe, config) {
     pipe.on('request', function (request) {
         pipe.throw(new Error('Error'));
     })
 }
 
 // reply with http response
-function transport(pipe) {
+function transport(pipe, config) {
     pipe.on('request', function (request) {
         pipe.respond({
             statusCode: 200,
@@ -161,7 +172,7 @@ function transport(pipe) {
 
 #### Transport definition using http protocol as a base
 
-For more advanced example please see [trooba-http-transport](https://github.com/trooba/trooba-http-transport) module
+For a more advanced example, please see [trooba-http-transport](https://github.com/trooba/trooba-http-transport) module
 
 ```js
 var Http = require('http');
@@ -278,17 +289,17 @@ client.search('nike', console.log);
 
 ### Interface
 
-Allows to define a custom client API if the generic request function is not enough.
+Allows to define a custom API if the generic request pipe object is not enough. It can be used to create an API specific to the schema (soap, grpc)
 
 ```js
 Trooba.interface(function implementation(pipe) {});
 ```
 
-The interface implementation should be a function that returns a new function or service client object.
-The function is injected with a pipe object that allows to [re-]initiate the pipeline flow as well as hook to various events running within the pipeline.
+The interface implementation should be a function that should return a service client object.
+The function is provided with a pipe object that allows to control a pipeline flow as well as hook to various events running within the pipeline.
 
 ```js
-var client = Trooba.transport(transportFactory, {
+var client = Trooba.transport(transport, {
     protocol: 'https:',
     hostname: 'www.google.com',
     path: '/search'

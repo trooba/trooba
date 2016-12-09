@@ -152,12 +152,12 @@ PipePoint.prototype = {
             this.next : this.prev;
 
         if (nextPoint) {
-            if (!this.context) {
+            if (!message.context && !this.context) {
                 throw new Error('Context is missing, make sure context() is used first');
             }
             // attach context to the message to keep context flow
             // check processing step to see where context goes
-            message.context = this.context;
+            message.context = message.context || this.context;
             // forward message down the pipe
             nextPoint.process(message);
         }
@@ -180,20 +180,21 @@ PipePoint.prototype = {
     },
 
     process: function process(message) {
-        // IMPORTANT: This should always be the first to propagate context
-        // create point bound to current message and assign the context
-        var point = this.clone(); // this clone is 5 times faster then Object.create
-        point.context = message.context;
-
+        var point = this;
+        var messageHandlers;
         // context propagation is sync and
         // init all points in the pipeline
         if (message.type === 'context') {
+            // create point bound to current message and assign the context
+            // this clone is 5 times faster then Object.create
+            point = point.clone();
+            point.context = message.context;
             // allow hooks to happen
             point.handler(point, point.config);
         }
         else {
             // handle the hooks
-            var messageHandlers = point.handlers();
+            messageHandlers = this.handlers(message.context);
             var processMessage = messageHandlers[message.type];
             if (processMessage) {
                 // if sync delivery, than no callback needed before propagation further
@@ -358,8 +359,8 @@ PipePoint.prototype = {
         return this;
     },
 
-    handlers: function handlers() {
-        var ctx = this.context;
+    handlers: function handlers(ctx) {
+        ctx = ctx || this.context;
         if (!ctx) {
             throw new Error('Context is missing, please make sure context() is used first');
         }

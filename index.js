@@ -133,7 +133,7 @@ module.exports.Type = Types;
 function PipePoint(handler) {
     this._messageHandlers = {};
     this.handler = handler;
-    if (typeof handler !== 'function') {
+    if (handler && typeof handler !== 'function') {
         this.handler = handler.handler;
         this.config = handler.config;
     }
@@ -142,6 +142,8 @@ function PipePoint(handler) {
     PipePoint.instanceCounter = PipePoint.instanceCounter ? PipePoint.instanceCounter : 0;
     this._id = PipePoint.instanceCounter++;
 }
+
+module.exports.PipePoint = PipePoint;
 
 PipePoint.prototype = {
     send: function send(message) {
@@ -166,10 +168,21 @@ PipePoint.prototype = {
         return this;
     },
 
+    clone: function clone() {
+        var ret = new PipePoint();
+        ret.next = this.next;
+        ret.prev = this.prev;
+        ret._id = this._id;
+        ret._messageHandlers = this._messageHandlers;
+        ret.config = this.config;
+        ret.handler = this.handler;
+        return ret;
+    },
+
     process: function process(message) {
         // IMPORTANT: This should always be the first to propagate context
         // create point bound to current message and assign the context
-        var point = Object.create(this);
+        var point = this.clone(); // this clone is 5 times faster then Object.create
         point.context = message.context;
 
         // context propagation is sync and

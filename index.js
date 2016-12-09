@@ -125,6 +125,7 @@ var Types = {
     REQUEST: 1,
     RESPONSE: 2
 };
+module.exports.Type = Types;
 
 /*
 * Channel point forms a linked list node
@@ -167,38 +168,45 @@ PipePoint.prototype = {
 
     process: function process(message) {
         // IMPORTANT: This should always be the first to propagate context
-        // create point bound to current message
-        var self = Object.create(this);
-        // assign context
-        self.context = message.context;
+        // create point bound to current message and assign the context
+        var point = Object.create(this);
+        point.context = message.context;
 
         // context propagation is sync and
-        // allows to init all points if needed
+        // init all points in the pipeline
         if (message.type === 'context') {
-            // replace progenitor with contextual
-            self.handler(self, self.config);
+            // allow hooks to happen
+            point.handler(point, point.config);
         }
-
-        var messageHandlers = self.handlers();
-        var processMessage = messageHandlers[message.type];
-        if (processMessage) {
-            processMessage(message.ref, function onComplete(ref) {
-                if (arguments.length) {
-                    message.ref = ref;
-                }
-                // special case for stream
-                if (processEndEvent()) {
+        else {
+            // handle the hooks
+            var messageHandlers = point.handlers();
+            var processMessage = messageHandlers[message.type];
+            if (processMessage) {
+                // if sync delivery, than no callback needed before propagation further
+                processMessage(message.ref, message.sync ? undefined : onComplete);
+                if (!message.sync) {
+                    // on complete has continued the flow
                     return;
                 }
-                self.send(message);
-            });
-            return;
-        }
-        else if (processEndEvent()) {
-            return;
+            }
+            else if (processEndEvent()) {
+                return;
+            }
         }
 
-        self.send(message);
+        point.send(message);
+
+        function onComplete(ref) {
+            if (arguments.length) {
+                message.ref = ref;
+            }
+            // special case for stream
+            if (processEndEvent()) {
+                return;
+            }
+            point.send(message);
+        }
 
         function processEndEvent() {
             if ((message.type === 'response:data' ||
@@ -208,7 +216,7 @@ PipePoint.prototype = {
                     message.flow === Types.REQUEST ? 'request:end' : 'response:end'];
                 if (endHandler) {
                     endHandler(function onComplete() {
-                        self.send(message);
+                        point.send(message);
                     });
                     return true;
                 }

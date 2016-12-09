@@ -2,22 +2,31 @@
 
 "Trooba" [tru:ba'] means "Pipe" in Russian
 
-The module allows to create a pipeline to make service calls as well as handle service requests.
+## What is it?
 
-![pipeline flow](./docs/images/arch2.png)
+Trooba a fast isomorphic lightweight framework to build pipelines for request/response, stream/response, request/response and stream/stream use-cases spanning from a browser to a front-end app and further to a backend service.
 
-It defines a stateless generic pipeline/bus that can be used to execute multiple requests in parallel without any conflicts. The contextual information is passed along with a request and a response object or other defined or custom events.
+It uses a stateless generic pipeline/bus used to route multiple requests in "parallel" without any conflicts. The contextual information is passed along with the message.
 
-Allows to:
-* Customize a transport (http, soap, grpc, mock or custom) for a pipeline
+## What is it not?
+
+It is not another http based server framework like express, koa or hapi. It can be used to build a pipline for those as it is protocol free and allows to specify any transport one needs. For example see [examples](#examples)
+
+## What it can do for you?
+
 * Define a pipeline of handlers and execute it
-    * The handlers are executed in order they were added through the transport position is determined based on the type of the flow: a service invocation flow or service flow.
-* Define a service client; which can have an API different from what is returned by default.
+    * The handlers are executed in order they were added though the moment when the transport invoked depends on the type of the flow, in service invocation flow it will be called last, in service flow it will be an originator of the pipe.
+* Define a service client:
     * The request object is passed from client through a set of handlers before getting to the transport
     * The response object is passed in the reverse order of handlers from transport to the client.
 * Define a service (yet to be implemented):
     * The request object is passed from transport through a set of handlers before getting to the controller
     * The response object is passed in the reversed order from the controller defined by the user through a set of handlers to the transport of the service.
+* Set transport (http, soap, grpc, mock or custom) for a pipeline
+* Customize API returned by pipe.create() method mostly useful to provide a protocol specific API, for example, for gRPC one can expose API defined in proto file.
+* Support for request/response, pub/sub or a mix of the modes
+
+![pipeline flow](./docs/images/arch2.png)
 
 ## Install
 
@@ -27,18 +36,10 @@ npm install trooba --save
 
 ## Usage
 
-```js
-var Trooba = require('trooba');
+#### Build a pipe
 
-var pipe = Trooba
-    // setting transport or you can use module reference
-    .transport(function (pipe) {
-        // hook to request
-        pipe.on('request', function (request) {
-            // respond
-            pipe.respond('Hello ' + request.name);
-        })
-    })
+```js
+var pipe = require('trooba')
     // adding handler to collect metrics
     .use(function (pipe) {
         var start;
@@ -52,28 +53,53 @@ var pipe = Trooba
         })
     })  
     .use(retry, 2); // retry 2 times, see example of retry handler below
+```
 
-// request is re-usable and can be called many times in parallel
-// Make service calls
-// ================================== //
-pipe.create({  // injecting context
+#### Assign a transport
+
+```js
+// setting transport or you can use module reference
+pipe.transport(function (pipe) {
+    // hook to request
+    pipe.on('request', function (request) {
+        // respond
+        pipe.respond('Hello ' + request.name);
+    })
+})
+```
+
+#### Make a request
+
+injecting static context if any needed or this can be skipped.
+```js
+pipe = pipe.create({  
     foo: bar   
 })
-.request({
-    qwe: 'asd'
-})
-.on('error', console.error)
-.on('response', console.log);
-// ================================== //
-// Or you can do it with callback
-pipe.create({  // injecting context
-    foo: bar   
-})
-.request({
-    qwe: 'asd'
-}, console.log);
+```
+At this point the pipe becomes re-usable between multiple "parallel" requests.
+
+Make a request
+```js
+pipe.create()
+    .request({
+        qwe: 'asd'
+    })
+    .on('error', console.error)
+    .on('response', console.log);
 // ================================== //
 ```
+
+Or you can do it with a callback style
+```js
+pipe.create()
+    .request({
+        qwe: 'asd'
+    }, console.log);
+// ================================== //
+```
+
+**Note:** Though pipe API to add hooks looks like event emitter, it does not allow multiple hooks and will throw error if one attempts to add a hook for the event that already has it.
+If you really need to support multiple listeners, you can add an event dispatcher as a hook.
 
 ### Trooba API
 
@@ -87,11 +113,11 @@ pipe.create({  // injecting context
 * **create**([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be available to all handlers.
 * **service**() is YET TO BE implemented and would create a service for service side of the flow. This calls would return a service object.
 
-### Pipe Object API
+### Pipe API
 
 The pipe object is passed to all handlers and transport during initialization whenever new context is created via trooba.create(context) or pipe.create(context) call.
 
-#### Service invocation API
+#### Service Invocation API
 
 * **create**([context]) - creates a pipeline with new context or clones from the existing one if any present. THe method is mandatory to initiate a new request flow, otherwise the subsequent call will fail.
 * **request**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used, it will implicitly call *create* method
@@ -104,11 +130,12 @@ The pipe object is passed to all handlers and transport during initialization wh
     * **write(data)** write a chunk to the stream as "response:data" message
     * **end()** ends the stream and send "response:end" message
 * **send**(message) - sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
+* **context** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed.
 
-#### Service object API
+#### Service API
 
 * **listen**([callback]) starts the service on the port provided in transport configuration and returns a reference to the service object that can be used to close the service. The callback is called when the service is fully ready.
-* **close**(force, callback) shuts down the service and returns callback when it is fully closed.
+* **close**(force, callback) shuts down the service and callback is called when it is fully closed.
 
 #### Message
 
@@ -121,6 +148,7 @@ The current message structure:
     * 1 - request
     * 2 - response
 * **ref** is a reference to the data being sent in the message
+* **sync** is boolean, if equals true, the message will be propagated to all pipe points at the same time, no callback is needed to control when to send it to the next handler in the pipeline.
 * The rest of the fields will be assigned by the framework and should not be changed
 
 Example:
@@ -128,13 +156,14 @@ Example:
 {
     "type": "error",
     "flow": 1,
-    "ref": "[Error: some error message]"
+    "ref": "[Error: some error message]",
+    "sync": true
 }
 ```
 
 ### Transport
 
-Transport should provide an actual implementation of the corresponding protocol (http/grpc/soap/rest) is implemented by the transport provider.
+Transport should provide an actual implementation of the corresponding protocol (http/grpc/soap/rest).
 
 It can also provide a custom API that will be exposed as if it was service/client native API.
 

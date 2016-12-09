@@ -1163,7 +1163,7 @@ describe(__filename, function () {
         })
         .create()
         .once('response', function (response) {
-            // Assert.equal('foobar', response);
+            Assert.equal('foobar', response);
             done();
         })
         .send({
@@ -1177,6 +1177,85 @@ describe(__filename, function () {
             ref: 'foo'
         });
 
+    });
+
+    it('should send sync custom message for custom handler', function (done) {
+        Trooba.transport(function (pipe) {
+            pipe.on('custom-handle-message', function (data) {
+                pipe.respond(data+pipe.context.data);
+            });
+        })
+        .use(function replace(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                // since we get sync message we do not need to call any next method
+                // one cannot prevent it from propagation down the pipeline
+                Assert.ok(!next, 'Should not be provided');
+
+                pipe.context.data = 'foo';
+            });
+        })
+        .use(function shouldNotAffect(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                // since we get sync message we do not need to call any next method
+                // one cannot prevent it from propagation down the pipeline
+                Assert.ok(!next, 'Should not be provided');
+                // symulate delayed context change that should not affect reponse
+                setTimeout(function () {
+                    pipe.context.data = 'boom';
+                }, 10);
+            });
+        })
+        .create()
+        .once('response', function (response) {
+            Assert.equal('barfoo', response);
+
+            done();
+        })
+        .send({
+            type: 'custom-handle-message',
+            flow: 1,
+            ref: 'bar',
+            sync: true
+        });
+    });
+
+    it('should send async custom message for custom handler', function (done) {
+        Trooba.transport(function (pipe) {
+            pipe.on('custom-handle-message', function (data) {
+                pipe.respond(data+pipe.context.data);
+            });
+        })
+        .use(function replace(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                // this change will be overwritten by the next handler
+                pipe.context.data = 'foo';
+                next();
+            });
+        })
+        .use(function shouldNotAffect(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                // since we get sync message we do not need to call any next method
+                // one cannot prevent it from propagation down the pipeline
+
+                // symulate delayed context change that should not affect reponse
+                setTimeout(function () {
+                    pipe.context.data = 'boom';
+                    next();
+                }, 10);
+            });
+        })
+        .create()
+        .once('response', function (response) {
+            Assert.equal('barboom', response);
+
+            done();
+        })
+        .send({
+            type: 'custom-handle-message',
+            flow: 1,
+            ref: 'bar',
+            sync: false
+        });
     });
 
     it('should catch only request chunks', function (done) {

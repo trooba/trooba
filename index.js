@@ -8,24 +8,20 @@ function Trooba() {
 }
 
 Trooba.prototype = {
-    transport: function transport(transport, config) {
-        if (typeof transport === 'string') {
-            transport = require(transport);
-        }
-        this._transport = {
-            handler: transport,
-            config: config
-        };
-        if (transport.api) {
-            this._api = transport.api;
-        }
-        return this;
-    },
 
     use: function use(handler, config) {
         if (typeof handler === 'string') {
             handler = require(handler);
         }
+
+        if (handler instanceof PipePoint) {
+            var point = handler;
+            handler = function pipeConnect(pipe) {
+                pipe.on('*', point.send);
+                point.on('*', pipe.send);
+            };
+        }
+
         this._handlers.unshift({
             handler: handler,
             config: config
@@ -34,47 +30,24 @@ Trooba.prototype = {
         return this;
     },
 
-    /**
-    * If config parameters is provided, then we assume api to be an API wrapper factory,
-    * otherwise it is considered as an instance of API wrapper
-    */
-    interface: function interface$(api, config) {
-        this._api = {
-            handler: api,
-            config: config
-        };
-        return this;
-    },
-
-    create: function create(context) {
-        var self = this;
-
-        var pipe = this._pipe = this._pipe || buildPipe(
-            this._handlers,
-            // allow lazy transport binding via request context
-            createPipePoint(function injectTransport(pipe) {
-                var tr = pipe.context.transport || self._transport;
-                if (!tr) {
-                    throw new Error('Transport is not provided');
-                }
-                tr.handler ?
-                    tr.handler(pipe, tr.config) :
-                    tr(pipe);
-            }
-        ));
-
-        if (this._api) {
-            pipe = context ? pipe.create(context) : pipe;
-            var pipeApi = {
-                create: function create(context) {
-                    return pipe.create(context);
-                }
-            };
-            return this._api.handler ? this._api.handler(pipeApi, this._api.config) :
-                this._api(pipeApi);
+    build: function build$(context, interfaceName) {
+        if (typeof arguments[0] === 'string') {
+            interfaceName = arguments[0];
+            context = undefined;
+        }
+        var pipe = this._pipe;
+        if (!pipe) {
+            var handlers = this._handlers.slice();
+            handlers.push(function startPoint() {});
+            pipe = this._pipe = buildPipe(handlers);
         }
 
-        return pipe.create(context || {});
+        pipe = pipe.create(context || {});
+        var factory = interfaceName && pipe.get(interfaceName);
+        if (interfaceName && !factory) {
+            throw new Error('Cannot find factory for ' + interfaceName);
+        }
+        return interfaceName ? factory(pipe) : pipe;
     }
 };
 
@@ -93,20 +66,10 @@ module.exports.interface = function createWithInterface(api, config) {
     return trooba.interface(api, config);
 };
 
-/**
-   The pipe API signature is
-    pipe.on()
-        .context()
-        .request()
-        .end()
-
-*/
-function buildPipe(handlers, target) {
-    var pipe = handlers.reduce(function reduce(next, handlerMeta) {
+function buildPipe(handlers) {
+    return handlers.reduce(function reduce(next, handlerMeta) {
         return createPipePoint(handlerMeta, next);
-    }, target);
-
-    return createPipePoint(function startPipe(pipe) {}, pipe);
+    }, undefined);
 }
 module.exports.buildPipe = buildPipe;
 
@@ -146,7 +109,7 @@ function PipePoint(handler) {
 module.exports.PipePoint = PipePoint;
 
 PipePoint.prototype = {
-    send: function send(message) {
+    send: function send$(message) {
         // pick the direction
         var nextPoint = message.flow === Types.REQUEST ?
             this.next : this.prev;
@@ -168,7 +131,7 @@ PipePoint.prototype = {
         return this;
     },
 
-    clone: function clone() {
+    copy: function copy$() {
         var ret = new PipePoint();
         ret.next = this.next;
         ret.prev = this.prev;
@@ -179,15 +142,23 @@ PipePoint.prototype = {
         return ret;
     },
 
-    process: function process(message) {
+    set: function set(name, value) {
+        this.context['$'+name] = value;
+    },
+
+    get: function get(name) {
+        return this.context['$'+name];
+    },
+
+    process: function process$(message) {
         var point = this;
         var messageHandlers;
         // context propagation is sync and
         // init all points in the pipeline
         if (message.type === 'context') {
             // create point bound to current message and assign the context
-            // this clone is 5 times faster then Object.create
-            point = point.clone();
+            // this copy is 5 times faster then Object.create
+            point = point.copy();
             point.context = message.context;
             // allow hooks to happen
             point.handler(point, point.config);
@@ -195,10 +166,16 @@ PipePoint.prototype = {
         else {
             // handle the hooks
             messageHandlers = this.handlers(message.context);
+            var anyType;
             var processMessage = messageHandlers[message.type];
+            if (!processMessage) {
+                processMessage = messageHandlers['*'];
+                anyType = true;
+            }
             if (processMessage) {
                 // if sync delivery, than no callback needed before propagation further
-                processMessage(message.ref, message.sync ? undefined : onComplete);
+                processMessage(anyType ? message : message.ref,
+                    message.sync ? undefined : onComplete);
                 if (!message.sync) {
                     // on complete has continued the flow
                     return;
@@ -239,10 +216,10 @@ PipePoint.prototype = {
     },
 
     /*
-    * context method is sync methods that runs through all handlers
+    * Create contextual channel
+    * context method is a sync method that runs through all handlers
     * to allow them to hook to events they are interested in
-    * The context will be attached to every message and bound to pipe (Object.create is pretty fast) at the time of
-    * processing by different points to preserve the context
+    * The context will be attached to every message and bound to pipe
     */
     create: function create$(context) {
         context = context || {};
@@ -256,12 +233,8 @@ PipePoint.prototype = {
                 }
             });
         }
-
-        // do not inherit message handles from previous context
-        context.$points = undefined;
-
         // bind context to the point and return it
-        var contextualPoint = Object.create(this);
+        var contextualPoint = this.copy();
         contextualPoint.context = context;
         contextualPoint.send({
             type: 'context',

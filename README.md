@@ -15,15 +15,15 @@ It is not another http based server framework like express, koa or hapi. It can 
 ## What it can do for you?
 
 * Define a pipeline of handlers and execute it
-    * The handlers are executed in order they were added though the moment when the transport invoked depends on the type of the flow, in service invocation flow it will be called last, in service flow it will be an originator of the pipe.
+    * The handlers are executed in order they were added.
 * Define a service client:
-    * The request object is passed from client through a set of handlers before getting to the transport
-    * The response object is passed in the reverse order of handlers from transport to the client.
-* Define a service (yet to be implemented):
+    * The request object is passed from client through a set of handlers before getting to the transport handler
+    * The response object is passed in the reverse order of handlers from transport handler to the client.
+* Define a service:
     * The request object is passed from transport through a set of handlers before getting to the controller
     * The response object is passed in the reversed order from the controller defined by the user through a set of handlers to the transport of the service.
-* Set transport (http, soap, grpc, mock or custom) for a pipeline
-* Customize API returned by pipe.create() method mostly useful to provide a protocol specific API, for example, for gRPC one can expose API defined in proto file.
+* Set transport handler or a set of them in the fallback order (http, soap, grpc, mock or custom) for a pipeline
+* Customize API returned by pipe.build(customApiName) method mostly useful to provide a protocol specific API, for example, gRPC can expose API defined in proto file or soap defined by wsdl.
 * Support for request/response, pub/sub or a mix of the modes
 
 ![pipeline flow](./docs/images/arch2.png)
@@ -59,7 +59,7 @@ var pipe = require('trooba')
 
 ```js
 // setting transport or you can use module reference
-pipe.transport(function (pipe) {
+pipe.use(function transport(pipe) {
     // hook to request
     pipe.on('request', function (request) {
         // respond
@@ -70,9 +70,9 @@ pipe.transport(function (pipe) {
 
 #### Make a request
 
-injecting static context if any needed or this can be skipped.
+Injecting static context if any needed or this can be skipped.
 ```js
-pipe = pipe.create({  
+pipe = pipe.build({  
     foo: bar   
 })
 ```
@@ -103,23 +103,18 @@ If you really need to support multiple listeners, you can add an event dispatche
 
 ### Trooba API
 
-* **transport**(transport[, config]) is an optional method that hooks the pipeline to the specific transport
-   * *transport* is a function (pipe) that defines transport actions based on the protocol (http, grpc, soap)
-   * *config* is an optional config object that has configuration for the transport
-* **interface**([function implementation(pipe)]) is an optional method to inject a custom interface that would be returned by *create* method
 * **use**(handler[, config]) adds a handler to the pipeline
    * *handler* is a function handler(pipe){}
    * *config* is a config object for the handler
-* **create**([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be available to all handlers.
-* **service**() is YET TO BE implemented and would create a service for service side of the flow. This calls would return a service object.
+* **build*([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be available to all handlers.
+* **set**(name, value) used set system value to the context. The name is prefixed with '$' that prevents it from being propagated beyond the pipe boundaries.
+* **get**(name) is used to get system value from the context.
 
 ### Pipe API
 
-The pipe object is passed to all handlers and transport during initialization whenever new context is created via trooba.create(context) or pipe.create(context) call.
+The pipe object is passed to all handlers and transport during initialization whenever new context is created via trooba.build(context) or pipe.create(context) call.
 
-#### Service Invocation API
-
-* **create**([context]) - creates a pipeline with new context or clones from the existing one if any present. THe method is mandatory to initiate a new request flow, otherwise the subsequent call will fail.
+* **create**([context]) - creates a pipeline with new context or clones from the existing one if any present. The method is mandatory to initiate a new flow, otherwise the subsequent call will fail.
 * **request**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used, it will implicitly call *create* method
 * **streamRequest**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used. It returns write stream with methods:
     * **write(data)** write a chunk to the stream as "request:data" message
@@ -130,12 +125,7 @@ The pipe object is passed to all handlers and transport during initialization wh
     * **write(data)** write a chunk to the stream as "response:data" message
     * **end()** ends the stream and send "response:end" message
 * **send**(message) - sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
-* **context** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed.
-
-#### Service API
-
-* **listen**([callback]) starts the service on the port provided in transport configuration and returns a reference to the service object that can be used to close the service. The callback is called when the service is fully ready.
-* **close**(force, callback) shuts down the service and callback is called when it is fully closed.
+* **context** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed. The values in the context that have their names started with '$' will not be propagated beyond the pipe boundaries
 
 #### Message
 
@@ -163,15 +153,15 @@ Example:
 
 ### Transport
 
-Transport should provide an actual implementation of the corresponding protocol (http/grpc/soap/rest).
+Transport is a handler that should provide an actual implementation of the corresponding protocol (http/grpc/soap/rest). Usually the request flow would be terminated at transport point and the response flow is initiated.
 
-It can also provide a custom API that will be exposed as if it was service/client native API.
+It can also provide a custom API that cab be injected into context using pipe.set() end accessed using get() method.
 
-#### Transport API
-
-Transport accepts two parameters:
-* **pipe** holds a reference to the pipeline; for more info please see definition below.
-* **config** is an optional object that holds a transport configuration if any.
+For example:
+```js
+var service = pipe.build('service:hello');
+service.hello('John');
+```
 
 #### Transport usage
 
@@ -237,11 +227,11 @@ function transport(pipe, config) {
     });
 }
 
-var pipe = Trooba.transport(transportFactory, {
+var pipe = Trooba.use(transportFactory, {
     protocol: 'https:',
     hostname: 'www.google.com',
     path: '/search?q=nike'
-}).create();
+}).build();
 
 // REQUEST execution
 // ========================================= //
@@ -291,87 +281,36 @@ function transportFactory() {
 
             req.end();
         });
+
+        pipe.set('client', function clientFactory(pipe) {
+            return {
+                search: (name, callback) => {
+                    pipe.create()
+                    .on('error', err => {
+                        callback(err);
+                    })
+                    .on('response', response => {
+                        callback(null, response.body);
+                    })
+                    .request({
+                        q: name
+                    });
+                }
+            };
+        });
     }
 
-    transport.api = pipe => {
-        return {
-            search: (name, callback) => {
-                pipe.create()
-                .on('error', err => {
-                    callback(err);
-                })
-                .on('response', response => {
-                    callback(null, response.body);
-                })
-                .request({
-                    q: name
-                });
-            }
-        };
-    };
 
     return transport;
 }
 
-var client = Trooba.transport(transportFactory(), {
+var client = Trooba.use(transportFactory(), {
     protocol: 'http:',
     hostname: 'www.google.com',
     path: '/search'
-}).create();
+}).build('client');
 
 client.search('nike', console.log);
-```
-
-### Interface
-
-Allows to define a custom API if the generic request pipe object is not enough. It can be used to create an API specific to the schema (soap, grpc)
-
-```js
-Trooba.interface(function implementation(pipe) {});
-```
-
-The interface implementation should be a function that should return a service client object.
-The function is provided with a pipe object that allows to control a pipeline flow as well as hook to various events running within the pipeline.
-
-```js
-var client = Trooba.transport(transport, {
-    protocol: 'https:',
-    hostname: 'www.google.com',
-    path: '/search'
-})
-.interface(function api(pipe) {
-    return {
-        search: (name, callback) => {
-            pipe.create().request( {
-                q: name
-            }, callback);
-        }
-    }
-})
-.create();
-// invoking
-client.search('nike', (err, response) => console.log);
-```
-
-#### Custom API via interface with configuration
-
-```js
-Trooba.transport(transport, {
-    protocol: 'https:',
-    hostname: 'www.google.com',
-    path: '/search'
-})
-.interface(function api(pipe, config) {
-    return {
-        search: (name, callback) => {
-            pipe.create().request( {
-                q: name
-            }, callback);
-        }
-    }
-}
-})
-.create().search('nike', (err, response) => console.log);
 ```
 
 ### Handler definition
@@ -379,7 +318,6 @@ Trooba.transport(transport, {
 Each handler should perform a unique function within a pipeline, such as error handling, retry logic, tracing.
 
 The handler has the same signature as the transport, the difference only in what one does with pipe and what events it listens to.
-
 
 ##### Request flow only handler
 
@@ -607,9 +545,10 @@ function createMockTransport() {
     };
 }
 
-var client = Trooba.transport(createMockTransport())
+var client = Trooba
     .use(retry, { retry: 1 })
-    .create();
+    .use(createMockTransport())
+    .build();
 
 client.request({}, function (err, response) {
     Assert.ok(!err, err && err.stack);
@@ -628,12 +567,12 @@ Based on [trooba-xhr-transport](https://github.com/trooba/trooba-xhr-transport)
 ```js
 var xhrTransportFactory = require('trooba-xhr-transport');
 require('trooba')
-    .transport(xhrTransportFactory, {
+    .use(xhrTransportFactory, {
         protocol: 'http:',
         hostname: 'myapi.service.xyz'
         socketTimeout: 1000
     })
-    .create()
+    .build('client')
     .get({
         q: 'nike'
     })
@@ -649,13 +588,13 @@ Based on [trooba-http-transport](https://github.com/trooba/trooba-http-transport
 
 ```js
 require('trooba')
-    .transport(httpTransportFactory, {
+    .use(httpTransportFactory, {
         protocol: 'http:',
         hostname: 'www.google.com',
         connectTimeout: 100,
         socketTimeout: 1000
     })
-    .create()
+    .build('client')
     .get({
         q: 'nike'
     })
@@ -673,13 +612,13 @@ Based on [trooba-grpc-transport](https://github.com/trooba/trooba-grpc-transport
 var grpcTransportFactory = require('trooba-grpc-transport');
 
 require('trooba')
-    .transport(grpcTransportFactory, {
+    .use(grpcTransportFactory, {
         protocol: 'http:',
         hostname: 'grpc.service.my',
         port: 50001,
         proto: require.resolve('path/to/hello.proto')
     })
-    .create()
+    .build('client')
     .hello('Bob', function (err, response) {
         console.log(err, response)
     });
@@ -689,11 +628,11 @@ require('trooba')
 
 ```js
 require('trooba')
-    .transport(return mock(pipe) {
+    .use(return mock(pipe) {
         pipe.on('request', function(request) {
             pipe.throw(new Error('Simulate error'));
         });
     })
-    .create()
+    .build()
     .request({foo:'bar'}, console.log);
 ```

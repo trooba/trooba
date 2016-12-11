@@ -48,33 +48,33 @@ describe(__filename, function () {
 
                     req.end();
                 });
-            }
 
-            transport.api = pipe => {
-                return {
-                    search: (name, callback) => {
-                        pipe.create()
-                        .on('error', err => {
-                            callback(err);
-                        })
-                        .on('response', response => {
-                            callback(null, response.body);
-                        })
-                        .request({
-                            q: name
-                        });
-                    }
-                };
-            };
+                pipe.set('api', pipe => {
+                    return {
+                        search: (name, callback) => {
+                            pipe.create()
+                            .on('error', err => {
+                                callback(err);
+                            })
+                            .on('response', response => {
+                                callback(null, response.body);
+                            })
+                            .request({
+                                q: name
+                            });
+                        }
+                    };
+                });
+            }
 
             return transport;
         }
 
-        var client = Trooba.transport(transportFactory(), {
+        var client = Trooba.use(transportFactory(), {
             protocol: 'http:',
             hostname: 'www.google.com',
             path: '/search'
-        }).create();
+        }).build('api');
 
         client.search('nike', function (err, response) {
             session.done();
@@ -118,12 +118,12 @@ describe(__filename, function () {
 
         }
 
-        Trooba.transport(transport, {
+        Trooba.use(transport, {
             protocol: 'http:',
             hostname: 'www.google.com',
             path: '/search'
         })
-        .create()
+        .build()
         .request({
             q: 'nike'
         }, function (err, response) {
@@ -167,11 +167,11 @@ describe(__filename, function () {
 
         }
 
-        var client = Trooba.transport(transport, {
+        var client = Trooba.use(transport, {
             protocol: 'http:',
             hostname: 'www.google.com',
             path: '/search'
-        }).create();
+        }).build();
 
         client.request({
             q: 'nike'
@@ -219,9 +219,10 @@ describe(__filename, function () {
             };
         }
 
-        var client = Trooba.transport(createMockTransport())
+        var client = Trooba
             .use(retry, { retry: 1 })
-            .create();
+            .use(createMockTransport())
+            .build();
 
         client.request({}, function (err, response) {
             Assert.ok(!err, err && err.stack);

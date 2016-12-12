@@ -1,9 +1,8 @@
 'use strict';
 
-module.exports = function testFactory() {
-    return function testHandler(requestPipe) {
-        requestPipe.context.request.test = true;
-        requestPipe
-            .next();
-    };
+module.exports = function testHandler(pipe) {
+    pipe.on('request', function (request, next) {
+        request.test = true;
+        next();
+    });
 };

@@ -4,105 +4,79 @@ var Assert = require('assert');
 var Domain = require('domain');
 var NodeUtils = require('util');
 var _ = require('lodash');
+var Async = require('async');
 var Trooba = require('..');
 
 describe(__filename, function () {
     it('should create transport from factory function', function () {
-        var client = Trooba.transport(function () {
-            return function tr(requestPipe) {
+        var client = Trooba.use(function () {
+            return function tr(pipe) {
             };
         });
         Assert.ok(client);
         Assert.ok(client.use);
-        Assert.ok(client.create);
+        Assert.ok(client.build);
     });
 
     it('should create transport from module reference', function () {
-        var client = Trooba.transport(require.resolve('./fixtures/test-transport'));
+        var client = Trooba.use(require.resolve('./fixtures/test-transport'));
         Assert.ok(client);
         Assert.ok(client.use);
-        Assert.ok(client.create);
-    });
-
-    it('should bind transport later via handler', function (done) {
-        // this would allow bootstraping pipeline and transport binding via handler
-        Trooba.use(function injectTransport() {
-            return function inject(requestPipe) {
-                requestPipe.context.transport = function tr(requestPipe) {
-                    Assert.ok(requestPipe);
-                    Assert.ok(requestPipe.context.request);
-                    Assert.deepEqual({
-                        foo: 'bar'
-                    }, requestPipe.context.request);
-
-                    requestPipe.reply({
-                        qaz: 'qwe'
-                    });
-                };
-
-                requestPipe.next();
-            };
-        }).create()({
-            foo: 'bar'
-        }, function validateResponse(err, response) {
-            Assert.ok(!err);
-            Assert.ok(response);
-            Assert.deepEqual({
-                qaz: 'qwe'
-            }, response);
-            done();
-        });
+        Assert.ok(client.build);
     });
 
     it('should call transport with context', function (done) {
-        var resCtx;
-        Trooba.transport(function () {
-            return function tr(requestPipe) {
-                Assert.ok(requestPipe);
-                Assert.ok(requestPipe.context.request);
-                Assert.equal('thy', requestPipe.context.fer);
+        var pipe = Trooba.use(function tr(pipe) {
+            Assert.ok(pipe);
+            pipe.on('request', function onRequest(request) {
+                Assert.ok(request);
+                Assert.equal('thy', pipe.context.fer);
                 Assert.deepEqual({
                     foo: 'bar'
-                }, requestPipe.context.request);
+                }, request);
 
-                requestPipe.createResponsePipe({
-                    qaz: 'wsx'
-                }).reply({
-                    qaz: 'qwe'
-                });
-            };
-        }).create({
+                pipe.context.qaz = 'wsx';
+                setTimeout(function () {
+                    pipe.respond({
+                        qaz: 'qwe'
+                    });
+                }, 10);
+            });
+        })
+        .build({
             fer: 'thy'
-        })({
-            foo: 'bar'
-        })
-        .on('responsePipe', function (responsePipe) {
-            resCtx = responsePipe.context;
-        })
+        });
+
+        pipe
         .on('error', done)
         .on('response', function validateResponse(response) {
             Assert.ok(response);
-            Assert.equal('wsx', resCtx.qaz);
+            Assert.equal('wsx', pipe.context.qaz);
             Assert.deepEqual({
                 qaz: 'qwe'
             }, response);
             done();
+        })
+        .request({
+            foo: 'bar'
         });
     });
 
     it('should pass configuration to the transport', function (done) {
-        Trooba.transport(function (config) {
+        Trooba.use(function tr(pipe, config) {
             Assert.deepEqual({
                 asd: 'zxc'
             }, config);
-            return function tr(requestPipe) {
-                requestPipe.reply(_.assign({
+            pipe.on('request', function () {
+                pipe.respond(_.assign({
                     qaz: 'qwe'
                 }, config));
-            };
+            });
         }, {
             asd: 'zxc'
-        }).create()({
+        })
+        .build()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -116,35 +90,37 @@ describe(__filename, function () {
     });
 
     it('should pass configuration to the api impl', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.reply(NodeUtils.format(requestPipe.context.greeting,
-                    requestPipe.context.request));
-            };
-        })
-        .interface(function apiFactory(config) {
-            return function (pipe) {
+        var client = Trooba
+        .use(function (pipe, config) {
+            pipe.set('client', function factory(pipe) {
                 return {
                     hello: function (name, callback) {
-                        var requestContext = {
-                            greeting: config.greeting,
-                            request: name
-                        };
-
-                        pipe(requestContext)
-                            .on('error', function (err) {
-                                callback(err);
-                            })
-                            .on('response', function (response) {
-                                callback(undefined, response);
-                            });
+                        pipe
+                        .create({
+                            greeting: config.greeting
+                        })
+                        .on('error', function (err) {
+                            callback(err);
+                        })
+                        .on('response', function (response) {
+                            callback(undefined, response);
+                        })
+                        .request(name);
                     }
                 };
-            };
+            });
         }, {
             greeting: 'Hello %s'
         })
-        .create().hello('John', function validateResponse(err, response) {
+        .use(function tr(pipe) {
+            pipe.on('request', function (request) {
+                pipe.respond(NodeUtils.format(pipe.context.greeting,
+                    request));
+            });
+        })
+        .build('client');
+
+        client.hello('John', function validateResponse(err, response) {
             Assert.ok(!err, err && err.stack);
             Assert.ok(response);
             Assert.equal('Hello John', response);
@@ -152,28 +128,12 @@ describe(__filename, function () {
         });
     });
 
-    it('should handle error', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.throw(new Error('Test Error'));
-            };
-        }).create()({
-            foo: 'bar'
-        }, function validateResponse(err, response) {
-            Assert.ok(err);
-            Assert.equal('Test Error', err.message);
-            Assert.ok(!response);
-            done();
-        });
-    });
-
     it('should handle error from responseContext', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.createResponsePipe()
-                    .throw(new Error('Test Error'));
-            };
-        }).create()({
+        Trooba.use(function tr(pipe) {
+            pipe.on('request', function () {
+                pipe.throw(new Error('Test Error'));
+            });
+        }).build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(err);
@@ -183,18 +143,21 @@ describe(__filename, function () {
     });
 
     it('should call handler', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.reply(requestPipe.context.request);
-            };
+        Trooba
+        .use(function handler(pipe) {
+            pipe.on('request', function (request, next) {
+                next({
+                    foo: request.foo,
+                    rvb: 'zxc'
+                });
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.rvb = 'zxc';
-                requestPipe.next();
-            };
+        .use(function transport(pipe) {
+            pipe.on('request', function (request) {
+                pipe.respond(request);
+            });
         })
-        .create()({
+        .build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -206,14 +169,40 @@ describe(__filename, function () {
         });
     });
 
-    it('should resolve handler from module reference', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.reply(requestPipe.context.request);
-            };
+    it('should modify request in handler', function (done) {
+        Trooba
+        .use(function handler(pipe) {
+            pipe.on('request', function (request, next) {
+                next({
+                    rvb: 'zxc'
+                });
+            });
         })
+        .use(function transport(pipe) {
+            pipe.on('request', function (request) {
+                pipe.respond(request);
+            });
+        })
+        .build().request({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.ok(!err);
+            Assert.deepEqual({
+                rvb: 'zxc'
+            }, response);
+            done();
+        });
+    });
+
+    it('should resolve handler from module reference', function (done) {
+        Trooba
         .use(require.resolve('./fixtures/handler'))
-        .create()({
+        .use(function transport(pipe) {
+            pipe.on('request', function (request) {
+                pipe.respond(request);
+            });
+        })
+        .build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -227,18 +216,19 @@ describe(__filename, function () {
     });
 
     it('should call handler and return response', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
+        Trooba
+        .use(function handler(pipe) {
+            pipe.on('request', function (request) {
+                request.dfg = 'cvb';
+                pipe.respond(request);
+            });
+        })
+        .use(function transport(pipe) {
+            pipe.on('request', function () {
                 done(new Error('Should not happen'));
-            };
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.dfg = 'cvb';
-                requestPipe.reply(requestPipe.context.request);
-            };
-        })
-        .create()({
+        .build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -251,20 +241,21 @@ describe(__filename, function () {
     });
 
     it('should call handler with config', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                done(new Error('Should not happen'));
-            };
-        })
-        .use(function factory(config) {
-            return function handler(requestPipe) {
-                requestPipe.context.request.dfg = config.cfg;
-                requestPipe.reply(requestPipe.context.request);
-            };
+        Trooba
+        .use(function handler(pipe, config) {
+            pipe.on('request', function (request) {
+                request.dfg = config.cfg;
+                pipe.respond(request);
+            });
         }, {
             cfg: 'thy'
         })
-        .create()({
+        .use(function transport(pipe) {
+            pipe.on('request', function () {
+                done(new Error('Should not happen'));
+            });
+        })
+        .build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -277,25 +268,26 @@ describe(__filename, function () {
     });
 
     it('should execute a chain', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.context.request.tra = 'asd';
-                requestPipe.reply(requestPipe.context.request);
-            };
+        Trooba
+        .use(function handler(pipe) {
+            pipe.on('request', function (request, next) {
+                request.fa1 = 'zx1';
+                next();
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.fa1 = 'zx1';
-                requestPipe.next();
-            };
+        .use(function handler(pipe) {
+            pipe.on('request', function (request, next) {
+                request.fa2 = 'zx2';
+                next();
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.fa2 = 'zx2';
-                requestPipe.next();
-            };
+        .use(function transport(pipe) {
+            pipe.on('request', function (request) {
+                request.tra = 'asd';
+                pipe.respond(request);
+            });
         })
-        .create()({
+        .build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -310,25 +302,26 @@ describe(__filename, function () {
     });
 
     it('should execute a chain and propagate requestContext implicitly', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.context.request.tra = 'asd';
-                requestPipe.reply(requestPipe.context.request);
-            };
+
+        Trooba
+        .use(function handler(pipe) {
+            pipe.context.fa1 = 'zx1';
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.fa1 = 'zx1';
-                requestPipe.next();
-            };
+        .use(function handler(pipe) {
+            pipe.context.fa2 = 'zx2';
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.fa2 = 'zx2';
-                requestPipe.next();
-            };
+        .use(function tr(pipe) {
+            pipe.on('request', function onRequest(request) {
+                request.tra = 'asd';
+                Object.keys(pipe.context).forEach(function (name) {
+                    if (name !== 'transport' && name.charAt(0) !== '$') {
+                        request[name] = pipe.context[name];
+                    }
+                });
+                pipe.respond(request);
+            });
         })
-        .create()({
+        .build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -343,33 +336,34 @@ describe(__filename, function () {
     });
 
     it('should re-execute a chain', function (done) {
-        var request = Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.context.request.chain.push('tr');
-                requestPipe.reply(requestPipe.context.request);
-            };
+        var client = Trooba
+        .use(function handler(pipe) {
+            pipe.on('request', function(request, next) {
+                request.chain.push('i1');
+                next();
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.chain.push('i1');
-                requestPipe.next();
-            };
+        .use(function handler(pipe) {
+            pipe.on('request', function(request, next) {
+                request.chain.push('i2');
+                next();
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.chain.push('i2');
-                requestPipe.next();
-            };
+        .use(function handler(pipe) {
+            pipe.on('request', function(request, next) {
+                request.chain.push('i3');
+                next();
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.chain.push('i3');
-                requestPipe.next();
-            };
+        .use(function tr(pipe) {
+            pipe.on('request', function(request) {
+                request.chain.push('tr');
+                pipe.respond(request);
+            });
         })
-        .create();
+        .build();
 
-        request({
+        client.create().request({
             chain: ['q']
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -381,7 +375,7 @@ describe(__filename, function () {
                 'tr'
             ], response.chain);
 
-            request({
+            client.create().request({
                 chain: ['q']
             }, function validateResponse(err, response) {
                 Assert.ok(!err);
@@ -399,23 +393,24 @@ describe(__filename, function () {
         });
     });
 
-    it('should handle pipeRequest.throw(error) in transport by switching it to reply implicitly', function (done) {
-        Trooba.transport(function (config) {
-            return function tr() {
+    it('should handle pipe.throw(error) in transport by switching it to reply implicitly', function (done) {
+        Trooba
+        .use(function handler(pipe) {
+            pipe.on('request', function () {
+                pipe.throw(new Error('Test'));
+            });
+        })
+        .use(function handler(pipe) {
+            pipe.on('request', function () {
                 done(new Error('should not happen'));
-            };
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.throw(new Error('Test'));
-            };
-        })
-        .use(function factory() {
-            return function handler() {
+        .use(function tr(pipe) {
+            pipe.on('request', function () {
                 done(new Error('should not happen'));
-            };
+            });
         })
-        .create()({
+        .build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.deepEqual('Test', err.message);
@@ -431,25 +426,93 @@ describe(__filename, function () {
             }
         });
 
+        it('should send error back if no target consumer found for the response', function (done) {
+            var order = [];
+            var domain = Domain.create();
+            domain.run(function () {
+                Trooba
+                .use(function handler(pipe) {
+                    order.push('zx1');
+                })
+                .use(function handler(pipe) {
+                    order.push('zx2');
+                })
+                .use(function handler(pipe) {
+                    pipe.on('request', function () {
+                        setImmediate(function () {
+                            pipe.respond('ok');
+                        });
+                    });
+                })
+                .build()
+                .set('strict', 'response')
+                .request({
+                    foo: 'bar'
+                });
+            });
+
+            domain.once('error', function (err) {
+                Assert.equal('No target consumer found for the response "ok"', err.message);
+                Assert.deepEqual(['zx1', 'zx2'], order);
+                done();
+            });
+        });
+
+        it('should send error back if no target consumer found for the response and other types', function (done) {
+            var order = [];
+            var domain = Domain.create();
+            domain.run(function () {
+                Trooba
+                .use(function handler(pipe) {
+                    order.push('zx1');
+                })
+                .use(function handler(pipe) {
+                    order.push('zx2');
+                })
+                .use(function handler(pipe) {
+                    pipe.on('request', function () {
+                        setImmediate(function () {
+                            pipe.respond('ok');
+                        });
+                    });
+                })
+                .build()
+                .set('strict', ['response'])
+                .request({
+                    foo: 'bar'
+                });
+            });
+
+            domain.once('error', function (err) {
+                Assert.equal('No target consumer found for the response "ok"', err.message);
+                Assert.deepEqual(['zx1', 'zx2'], order);
+                done();
+            });
+        });
+
         it('should throw error if no error handler is registered', function (done) {
             var domain = Domain.create();
             domain.run(function () {
-                Trooba.transport(function (config) {
-                    return function tr() {
+                Trooba
+                .use(function handler(pipe) {
+                    pipe.on('request', function () {
+                        // make it async
+                        setImmediate(function () {
+                            pipe.throw(new Error('Test'));
+                        });
+                    });
+                })
+                .use(function handler(pipe) {
+                    pipe.on('request', function () {
                         done(new Error('should not happen'));
-                    };
+                    });
                 })
-                .use(function factory() {
-                    return function handler(requestPipe) {
-                        requestPipe.throw(new Error('Test'));
-                    };
-                })
-                .use(function factory() {
-                    return function handler() {
+                .use(function tr(pipe) {
+                    pipe.on('request', function () {
                         done(new Error('should not happen'));
-                    };
+                    });
                 })
-                .create()({
+                .build().request({
                     foo: 'bar'
                 });
             });
@@ -458,24 +521,157 @@ describe(__filename, function () {
                 done();
             });
         });
+
+        it('should preserve domain context in parallel', function (done) {
+            var match = 0;
+            var maxInFlight = 0;
+            function transport(pipe) {
+                pipe.on('request', function (request) {
+                    // simulate async
+                    setTimeout(function () {
+                        if (pipe.context.foo === request.foo) {
+                            match++;
+                        }
+
+                        setTimeout(function () {
+                            pipe.respond({
+                                foo: request.foo,
+                            });
+
+                        }, Math.round(100 * Math.random()));
+                    }, Math.round(100 * Math.random()));
+
+                });
+            }
+
+            function domainInjector(pipe) {
+                pipe.on('request', function (request, next) {
+                    var domain = Domain.create();
+                    domain.run(function () {
+                        process.domain.bar = request.foo;
+                        // simulate async
+                        setTimeout(function () {
+                            pipe.context.foo = request.foo;
+
+                            setTimeout(next, Math.round(100 * Math.random()));
+                        }, Math.round(100 * Math.random()));
+                    });
+                });
+
+                pipe.on('response', function (response, next) {
+                    Assert.ok(process.domain);
+                    Assert.equal(process.domain.bar, response.foo);
+                    next();
+                });
+            }
+
+            function handlerCtxModifier(pipe) {
+                pipe.on('request', function (request, next) {
+                    // simulate async
+                    setTimeout(function () {
+                        pipe.context.foo = request.foo;
+
+                        setTimeout(next, Math.round(100 * Math.random()));
+                    }, Math.round(100 * Math.random()));
+                });
+            }
+
+            var requestCounter = 0;
+            function handlerRequestCounter(pipe) {
+                pipe.on('request', function (request, next) {
+                    maxInFlight = Math.max(maxInFlight, requestCounter);
+                    // simulate async
+                    setTimeout(function () {
+                        requestCounter++;
+
+                        setTimeout(next, Math.round(100 * Math.random()));
+                    }, Math.round(100 * Math.random()));
+                });
+
+                pipe.on('response', function (response, next) {
+                    // simulate async
+                    setTimeout(function () {
+                        requestCounter--;
+
+                        setTimeout(next, Math.round(100 * Math.random()));
+                    }, Math.round(100 * Math.random()));
+                });
+            }
+
+            var pipe = Trooba
+                .use(domainInjector)
+                .use(handlerCtxModifier)
+                .use(handlerRequestCounter)
+                .use(transport)
+                .build();
+
+            function makeRequest(index, next) {
+                pipe = pipe.create();
+                var request = {
+                    foo: index
+                };
+                pipe.request(request, function (err, response) {
+                    Assert.ok(!err);
+                    Assert.deepEqual(request, response);
+                    next();
+                });
+            }
+
+            Async.times(1000, makeRequest, function (err, results) {
+                Assert.ok(!err);
+                Assert.equal(1000, results.length);
+                Assert.equal(0, requestCounter);
+                console.log('Max in-flight', maxInFlight);
+                done();
+            });
+
+        });
+
+        it('should handle once error and throw error when second one comes', function (done) {
+            var pipe = Trooba.use(function (pipe) {
+                pipe.once('request', function () {
+                    pipe.throw(new Error('Bad'));
+                    setTimeout(function () {
+                        pipe.throw(new Error('Bad again'));
+                    }, 10);
+                });
+            })
+            .build();
+
+            var domain = Domain.create();
+            domain.run(function () {
+                pipe.request({})
+                .once('error', function (err) {
+                    Object.keys(pipe.context.$points).forEach(function forEach(index) {
+                        Assert.deepEqual({}, pipe.context.$points[index]._messageHandlers);
+                    });
+                });
+            });
+            domain.once('error', function (err) {
+                Assert.equal('Bad again', err.message);
+                done();
+            });
+
+        });
     });
 
-    it('should handle double next (kind of streaming) with action.next', function (done) {
+    it('should handle double next without error with next', function (done) {
         var count = 0;
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.context.request.tra = 'asd';
-                requestPipe.reply(requestPipe.context.request);
-            };
+        Trooba
+        .use(function handler(pipe) {
+            pipe.on('request', function (request, next) {
+                request.fa2 = 'zx2';
+                next();
+                next();
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.request.fa2 = 'zx2';
-                requestPipe.next();
-                requestPipe.next();
-            };
+        .use(function tr(pipe) {
+            pipe.on('request', function (request) {
+                request.tra = 'asd';
+                pipe.respond(request);
+            });
         })
-        .create()({
+        .build().request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.deepEqual({
@@ -492,33 +688,25 @@ describe(__filename, function () {
     });
 
     it('should keep handlers order', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.context.order.push('tr');
-                requestPipe.reply(requestPipe.context.order);
-            };
+        Trooba
+        .use(function handler(pipe) {
+            pipe.context.order.push('zx1');
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.order.push('zx1');
-                requestPipe.next();
-            };
+        .use(function handler(pipe) {
+            pipe.context.order.push('zx2');
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.order.push('zx2');
-                requestPipe.next();
-            };
+        .use(function handler(pipe) {
+            pipe.context.order.push('zx3');
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.context.order.push('zx3');
-                requestPipe.next();
-            };
+        .use(function tr(pipe) {
+            pipe.on('request', function () {
+                pipe.context.order.push('tr');
+                pipe.respond(pipe.context.order);
+            });
         })
-        .create({
+        .build({
             order: []
-        })({
+        }).request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.equal(['zx1', 'zx2', 'zx3', 'tr'].toString(),
@@ -527,18 +715,99 @@ describe(__filename, function () {
         });
     });
 
+    it('should send error back if no target consumer found for the request', function (done) {
+        var order = [];
+        Trooba
+        .use(function handler(pipe) {
+            order.push('zx1');
+        })
+        .use(function handler(pipe) {
+            order.push('zx2');
+        })
+        .use(function handler(pipe) {
+            order.push('zx3');
+        })
+        .build()
+        .set('strict', 'request')
+        .request({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.ok(err);
+            Assert.equal('No target consumer found for the request {"foo":"bar"}', err.message);
+            Assert.equal(['zx1', 'zx2', 'zx3'].toString(),
+                order.toString());
+            done();
+        });
+    });
+
     it('should go full cycle with chunks', function (done) {
         var trCount = 0;
         var order = [];
-        var pipeCtx = Trooba.transport(function (config) {
-            return function tr(requestPipe) {
+        var pipeCtx = Trooba
+        .use(function handler(pipe) {
+            pipe.on('request', function (request, next) {
+                order.push('zx1-req');
+                pipe.on('response', function (response, next) {
+                    order.push('zx1-res');
+
+                    pipe.on('response:data', function (data, next) {
+                        order.push('zx1-' + (data || 'end'));
+                        next();
+                    });
+
+                    next();
+                });
+
+                next();
+            });
+
+        })
+        .use(function handler(pipe) {
+            pipe.on('request', function (request, next) {
+                order.push('zx2-req');
+                pipe.on('response', function asyncHandler(response, next) {
+                    order.push('zx2-res');
+                    next();
+                })
+                .on('error', function asyncHandler(err, next) {
+                    if (pipe.context.retry-- > 0) {
+                        order.push('retry');
+                        pipe.request(request);
+                    }
+                });
+                next();
+            });
+        })
+        .use(function handler(pipe) {
+
+            pipe
+            .on('request', function (request, next) {
+                order.push('zx3-req');
+                next();
+            })
+            .on('response', function (response, next) {
+                order.push('zx3-res');
+                next();
+            })
+            .on('response:data', function (data, next) {
+                order.push('zx3-' + (data || 'end'));
+                next();
+            })
+            .on('response:end', function (next) {
+                order.push('zx3-onEnd');
+                next();
+            });
+
+        })
+        .use(function transport(pipe) {
+            pipe.on('request', function () {
                 order.push('tr');
                 if (trCount++ < 1) {
-                    requestPipe.throw(new Error('Timeout'));
+                    pipe.throw(new Error('Timeout'));
                     return;
                 }
 
-                var response = requestPipe.reply(requestPipe.request);
+                var response = pipe.streamResponse(pipe.request);
                 setImmediate(function () {
                     response.write('data1');
                     setImmediate(function () {
@@ -546,81 +815,23 @@ describe(__filename, function () {
                         response.end();
                     });
                 });
-            };
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                order.push('zx1-req');
-                requestPipe.next()
-                    .on('response', function (response, next) {
-                        order.push('zx1-res');
-
-                        requestPipe.on('response-data', function (data, next) {
-                            order.push('zx1-' + (data || 'end'));
-                            next();
-                        });
-
-                        next();
-                    });
-            };
-        })
-        .use(function factoryRetry() {
-            return function handler(requestPipe) {
-                order.push('zx2-req');
-                requestPipe.next()
-                    .on('responsePipe', function syncHandler(responsePipe) {
-                        order.push('zx2-context');
-                    })
-                    .on('response', function asyncHandler(response, next) {
-                        order.push('zx2-res');
-                        next();
-                    })
-                    .on('error', function asyncHandler(err) {
-                        if (requestPipe.context.retry-- > 0) {
-                            order.push('retry');
-                            requestPipe.next();
-                        }
-                    });
-            };
-        })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                order.push('zx3-req');
-
-                requestPipe.next()
-                    .on('response', function (response, next) {
-                        order.push('zx3-res');
-                        next();
-                    })
-                    .on('response-data', function (data, next) {
-                        order.push('zx3-' + (data || 'end'));
-                        next();
-                    })
-                    .on('end', function (next) {
-                        order.push('zx3-onEnd');
-                        next();
-                    });
-
-            };
-        })
-        .create({
+        .build({
             retry: 1
-        })({
-            order: []
-        });
+        })
+        .request({});
 
-        pipeCtx.on('end', function validateResponse(err, response) {
+        pipeCtx.on('response:end', function validateResponse(err, response) {
 
             Assert.equal([
                 'zx1-req',
                 'zx2-req',
                 'zx3-req',
                 'tr',
-                'zx2-context',
                 'retry',
                 'zx3-req',
                 'tr',
-                'zx2-context',
                 'zx3-res',
                 'zx2-res',
                 'zx1-res',
@@ -637,71 +848,857 @@ describe(__filename, function () {
 
     });
 
-    it.skip('should not allow hook to the same event in the same handler', function (done) {
+    it('should link two pipes, propagate request, response and do trace', function (done) {
+        var order = [];
+        var route = [];
+        var pipe1 = Trooba
+        .use(function h1_1(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p1-h1');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p1-h1');
+                next();
+            });
+        }, {
+            id: 'one'
+        })
+        .use(function h1_2(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p1-h2');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p1-h2');
+                next();
+            });
+        }, {
+            id: 'two'
+        })
+        .use(function tr(pipe) {
+            pipe.on('request', function onRequest(request) {
+                order.push('tr1');
+                pipe.respond({
+                    p: pipe.context.p,
+                    c: pipe.context.c,
+                    foo: request.foo
+                });
+            });
+        }, {
+            id: 'three'
+        })
+        .build({
+            p: 1,
+            c: 1
+        });
+
+        var pipe = Trooba
+        .use(function h2_1(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p2-h1');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p2-h1');
+                next();
+            });
+        }, {
+            id: 'four'
+        })
+        .use(pipe1, {
+            id: 'five'
+        })
+        .use(function h2_2(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p2-h2');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p2-h2');
+                next();
+            });
+        }, {
+            id: 'six'
+        })
+        .build({
+            p: 2
+        });
+
+        pipe.trace(function (message, pipePoint) {
+            route.push(pipePoint.handler.name);
+        }).request({
+            foo: 'bar'
+        })
+        .on('response', function (response) {
+            Assert.deepEqual([
+                'req-p2-h1',
+                'req-p1-h1',
+                'req-p1-h2',
+                'tr1',
+                'res-p1-h2',
+                'res-p1-h1',
+                'res-p2-h1'
+            ], order);
+            Assert.deepEqual({
+                p: 2,
+                c: 1,
+                foo: 'bar'
+            }, response);
+            Assert.deepEqual([
+                'h2_1',
+                'pipeConnect',
+                'h1_1',
+                'h1_2',
+                'tr',
+                'h1_2',
+                'h1_1',
+                'startPoint',
+                'h2_1',
+                'startPoint'
+            ], route);
+            done();
+        });
+    });
+
+    it('should link two pipes and propagate error', function (done) {
+        var order = [];
+        var pipe1 = Trooba
+        .use(function h1(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p1-h1');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p1-h1');
+                next();
+            });
+        })
+        .use(function h2(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p1-h2');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p1-h2');
+                next();
+            });
+        })
+        .use(function tr(pipe) {
+            pipe.on('request', function onRequest(request) {
+                order.push('tr1');
+                pipe.throw(new Error('boom'));
+            });
+        })
+        .build({
+            p: 1,
+            c: 1
+        });
+
+        Trooba
+        .use(function h1(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p2-h1');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p2-h1');
+                next();
+            });
+        })
+        .use(pipe1)
+        .use(function h2(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p2-h2');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p2-h2');
+                next();
+            });
+        })
+        .build({
+            p: 2
+        })
+        .request({
+            foo: 'bar'
+        })
+        .on('error', function (err) {
+            Assert.equal('boom', err.message);
+            Assert.deepEqual([
+                'req-p2-h1',
+                'req-p1-h1',
+                'req-p1-h2',
+                'tr1'
+            ], order);
+
+            done();
+        });
 
     });
 
-    it.skip('should handle once error', function (done) {
+    it('should catch on response:data', function (done) {
+        var chunks = [];
+
+        Trooba.use(function tr(pipe) {
+            Assert.ok(pipe);
+            pipe.on('request', function onRequest(request) {
+                pipe.streamResponse({}).write('data1').write('data2').end();
+            });
+        })
+        .build()
+        .on('response:data', function (data, next) {
+            chunks.push(data);
+            next();
+        })
+        .on('response:end', function validateResponse() {
+            Assert.deepEqual(['data1', 'data2', undefined], chunks);
+            done();
+        })
+        .request({});
 
     });
 
-    it.skip('should handle once error and throw error when second one comes', function (done) {
+    it('should catch on response:end', function (done) {
+        Trooba.use(function tr(pipe) {
+            Assert.ok(pipe);
+            pipe.on('request', function onRequest(request) {
+                pipe.streamResponse({}).end();
+            });
+        })
+        .build()
+        .on('error', done)
+        .on('response:end', function validateResponse() {
+            done();
+        })
+        .request({});
+    });
+
+    it('should execute generic API many times in parallel', function (done) {
+        var match = 0;
+        var maxInFlight = 0;
+        function transport(pipe) {
+            pipe.on('request', function (request) {
+                // simulate async
+                setTimeout(function () {
+                    if (pipe.context.foo === request.foo) {
+                        match++;
+                    }
+
+                    setTimeout(function () {
+                        pipe.respond({
+                            foo: request.foo,
+                        });
+
+                    }, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+
+            });
+        }
+
+        function handlerCtxModifier(pipe) {
+            pipe.on('request', function (request, next) {
+                // simulate async
+                setTimeout(function () {
+                    pipe.context.foo = request.foo;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+        }
+
+        var requestCounter = 0;
+        function handlerRequestCounter(pipe) {
+            pipe.on('request', function (request, next) {
+                maxInFlight = Math.max(maxInFlight, requestCounter);
+                // simulate async
+                setTimeout(function () {
+                    requestCounter++;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+
+            pipe.on('response', function (response, next) {
+                // simulate async
+                setTimeout(function () {
+                    requestCounter--;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+        }
+
+        var pipe = Trooba
+            .use(handlerCtxModifier)
+            .use(handlerRequestCounter)
+            .use(transport)
+            .build();
+
+        function makeRequest(index, next) {
+            pipe = pipe.create();
+            var request = {
+                foo: index
+            };
+            pipe.request(request, function (err, response) {
+                Assert.ok(!err);
+                Assert.deepEqual(request, response);
+                next();
+            });
+        }
+
+        Async.times(1000, makeRequest, function (err, results) {
+            Assert.ok(!err);
+            Assert.equal(1000, results.length);
+            Assert.equal(0, requestCounter);
+            console.log('Max in-flight', maxInFlight);
+            done();
+        });
+    });
+
+    it('should execute custom API many times in parallel', function (done) {
+        var match = 0;
+        var maxInFlight = 0;
+        function transport(pipe) {
+            pipe.on('request', function (request) {
+                // simulate async
+                setTimeout(function () {
+                    if (pipe.context.foo === request.foo) {
+                        match++;
+                    }
+
+                    setTimeout(function () {
+                        pipe.respond({
+                            foo: request.foo,
+                        });
+
+                    }, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+
+            });
+        }
+
+        function handlerCtxModifier(pipe) {
+            pipe.on('request', function (request, next) {
+                // simulate async
+                setTimeout(function () {
+                    pipe.context.foo = request.foo;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+        }
+
+        var requestCounter = 0;
+        function handlerRequestCounter(pipe) {
+            pipe.on('request', function (request, next) {
+                maxInFlight = Math.max(maxInFlight, requestCounter);
+                // simulate async
+                setTimeout(function () {
+                    requestCounter++;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+
+            pipe.on('response', function (response, next) {
+                // simulate async
+                setTimeout(function () {
+                    requestCounter--;
+
+                    setTimeout(next, Math.round(100 * Math.random()));
+                }, Math.round(100 * Math.random()));
+            });
+        }
+
+        var client = Trooba
+            .use(handlerCtxModifier)
+            .use(handlerRequestCounter)
+            .use(transport)
+            .use(function injectApi(pipe) {
+                pipe.set('client', function clientFactory(pipe) {
+                    return {
+                        doRequest: function (index, callback) {
+                            pipe.create().request({
+                                foo: index
+                            }, callback);
+                        }
+                    };
+                });
+            })
+            .build('client');
+
+        function makeRequest(index, next) {
+            client.doRequest(index, function (err, response) {
+                Assert.ok(!err);
+                Assert.deepEqual(index, response.foo);
+                next();
+            });
+        }
+
+        Async.times(1000, makeRequest, function (err, results) {
+            Assert.ok(!err);
+            Assert.equal(1000, results.length);
+            Assert.equal(0, requestCounter);
+            console.log('Max in-flight', maxInFlight);
+            done();
+        });
+    });
+
+    it('should fail to write response after response is closed', function (done) {
+        Trooba.use(function (pipe) {
+            pipe.on('request', function () {
+                var response = pipe.streamResponse({});
+                response.write('foo')
+                    .end();
+
+                Assert.throws(function () {
+                    response.write();
+                }, /The stream has been closed already/);
+            });
+        })
+        .build()
+        .on('response:end', function () {
+            setTimeout(done, 10);
+        })
+        .request({});
 
     });
 
-    it.skip('should handle once response', function (done) {
+    it('should fail to write request after request is closed', function (done) {
+        var request = Trooba.use(function (pipe) {
+            pipe.on('request', function () {
+                pipe.respond({});
+            });
+        })
+        .build()
+        .on('response', function () {
+            setTimeout(done, 10);
+        })
+        .streamRequest({});
+
+        request.write('foo')
+            .end();
+
+        Assert.throws(function () {
+            request.write();
+        }, /The stream has been closed already/);
+    });
+
+    it('should inherit context from progenitor point', function (done) {
+        var client = Trooba.use(function (pipe) {
+            pipe.on('request', function () {
+                pipe.respond(pipe.context.foo + (pipe.context.qaz || ''));
+            });
+        })
+        .build({
+            foo: 'bar'
+        });
+
+        client.request({}, function (err, response) {
+            Assert.equal('bar', response);
+
+            client.create({
+                qaz: 'wsx'
+            }).request({}, function (err, response) {
+                Assert.equal('barwsx', response);
+                done();
+            });
+        });
+    });
+
+    it('should not allow hook to the same event in the same handler', function (done) {
+        var client = Trooba.use(function (pipe) {
+            pipe.on('request', function () {
+                pipe.respond({});
+            });
+        })
+        .build();
+
+        client.request({}, function () {
+            Assert.throws(function () {
+                client.request({}, function () {
+                });
+            }, /The hook has already been registered, you can use only one hook for specific event type: error/);
+            done();
+        });
+    });
+
+    it('should handle once error and once response', function (done) {
+        var pipe = Trooba.use(function (pipe) {
+            pipe.once('request', function () {
+                pipe.throw(new Error('Bad'));
+            });
+        })
+        .build();
+
+        pipe.request({})
+        .once('error', function (err) {
+            Object.keys(pipe.context.$points).forEach(function forEach(index) {
+                Assert.deepEqual({}, pipe.context.$points[index]._messageHandlers);
+            });
+            done();
+        });
+    });
+
+    it('should replace error', function (done) {
+        Trooba
+        .use(function replace(pipe) {
+            pipe.on('error', function (err, next) {
+                next(new Error('Another bad'));
+            });
+        })
+        .use(function (pipe) {
+            pipe.once('request', function () {
+                pipe.throw(new Error('Bad'));
+            });
+        })
+        .build()
+        .request({})
+        .once('error', function (err) {
+            Assert.equal('Another bad', err.message);
+            done();
+        });
 
     });
 
-    it.skip('should handle once responsePipe', function (done) {
+    it('should replace request', function (done) {
+        Trooba
+        .use(function replace(pipe) {
+            pipe.once('request', function (request, next) {
+                next('replaced');
+            });
+        })
+        .use(function (pipe) {
+            pipe.once('request', function (request) {
+                pipe.respond(request);
+            });
+        })
+        .build()
+        .request('original')
+        .once('response', function (response) {
+            Assert.equal('replaced', response);
+            done();
+        });
 
     });
 
-    it.skip('should send custom message for custom handler', function (done) {
+    it('should replace response', function (done) {
+        Trooba
+        .use(function replace(pipe) {
+            pipe.on('response', function (response, next) {
+                next('replaced');
+            });
+        })
+        .use(function (pipe) {
+            pipe.once('request', function (request) {
+                Assert.equal('original', request);
+                pipe.respond(request);
+            });
+        })
+        .build()
+        .request('original')
+        .once('response', function (response) {
+            Assert.equal('replaced', response);
+            done();
+        });
 
     });
 
-    it.skip('should catch only chunks', function (done) {
+    it('should handle once response', function (done) {
+        var pipe = Trooba.use(function (pipe) {
+            pipe.once('request', function (request) {
+                Assert.equal('original', request);
+                pipe.respond(request);
+            });
+        })
+        .build()
+        .once('response', function (response) {
+            Object.keys(pipe.context.$points).forEach(function forEach(index) {
+                Assert.deepEqual({}, pipe.context.$points[index]._messageHandlers);
+            });
+            done();
+        });
+        Object.keys(pipe.context.$points).forEach(function forEach(index) {
+            Assert.equal(1, Object.keys(pipe.context.$points[index]._messageHandlers).length);
+        });
+
+        pipe.request('original');
+    });
+
+    it('should send custom message for custom handler', function (done) {
+        var order = [];
+        Trooba
+        .use(function replace(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                pipe.context.data = data;
+                order.push('replace');
+                next();
+            });
+        })
+        .use(function transport(pipe) {
+            pipe.on('custom-request', function (data) {
+                order.push('tr');
+                pipe.respond(data+pipe.context.data);
+            });
+        })
+        .build()
+        .once('response', function (response) {
+            Assert.equal('foobar', response);
+            Assert.equal(['replace', 'tr'].toString(), order.toString());
+            done();
+        })
+        .send({
+            type: 'custom-handle-message',
+            flow: 1,
+            ref: 'bar'
+        })
+        .send({
+            type: 'custom-request',
+            flow: 1,
+            ref: 'foo'
+        });
 
     });
 
-    it.skip('should handle error after a few chunks', function (done) {
+    it('should send sync custom message for custom handler', function (done) {
+        var order = [];
+        Trooba
+        .use(function replace(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                // since we get sync message we do not need to call any next method
+                // one cannot prevent it from propagation down the pipeline
+                Assert.ok(!next, 'Should not be provided');
+                order.push('replace');
+
+                pipe.context.data = 'foo';
+            });
+        })
+        .use(function shouldNotAffect(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                // since we get sync message we do not need to call any next method
+                // one cannot prevent it from propagation down the pipeline
+                Assert.ok(!next, 'Should not be provided');
+                order.push('shouldNotAffect');
+                // symulate delayed context change that should not affect reponse
+                setTimeout(function () {
+                    pipe.context.data = 'boom';
+                }, 10);
+            });
+        })
+        .use(function transport(pipe) {
+            pipe.on('custom-handle-message', function (data) {
+                order.push('tr');
+                pipe.respond(data+pipe.context.data);
+            });
+        })
+        .build()
+        .once('response', function (response) {
+            Assert.deepEqual(['replace', 'shouldNotAffect', 'tr'], order);
+            Assert.equal('barfoo', response);
+
+            done();
+        })
+        .send({
+            type: 'custom-handle-message',
+            flow: 1,
+            ref: 'bar',
+            sync: true
+        });
+    });
+
+    it('should send async custom message for custom handler', function (done) {
+        var order = [];
+        Trooba
+        .use(function replace(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                order.push('replace');
+                // this change will be overwritten by the next handler
+                pipe.context.data = 'foo';
+                next();
+            });
+        })
+        .use(function shouldNotAffect(pipe) {
+            pipe.on('custom-handle-message', function (data, next) {
+                order.push('shouldNotAffect');
+                // since we get sync message we do not need to call any next method
+                // one cannot prevent it from propagation down the pipeline
+
+                // symulate delayed context change that should not affect reponse
+                setTimeout(function () {
+                    pipe.context.data = 'boom';
+                    next();
+                }, 10);
+            });
+        })
+        .use(function (pipe) {
+            pipe.on('custom-handle-message', function (data) {
+                order.push('tr');
+                pipe.respond(data+pipe.context.data);
+            });
+        })
+        .build()
+        .once('response', function (response) {
+            Assert.deepEqual(['replace', 'shouldNotAffect', 'tr'], order);
+
+            Assert.equal('barboom', response);
+
+            done();
+        })
+        .send({
+            type: 'custom-handle-message',
+            flow: 1,
+            ref: 'bar',
+            sync: false
+        });
+    });
+
+    it('should catch only request chunks', function (done) {
+        var pipe = Trooba.use(function (pipe) {
+            var reqData = [];
+            pipe.on('request:data', function (data, next) {
+                reqData.push(data);
+                next();
+            });
+            pipe.once('request:end', function (data) {
+                pipe.respond(reqData);
+            });
+        })
+        .build()
+        .on('response', function (response) {
+            Assert.deepEqual(['foo', 'bar', undefined], response);
+            done();
+        });
+
+        pipe.streamRequest('request')
+            .write('foo')
+            .write('bar')
+            .end();
 
     });
 
-    it.skip('should handle only errors', function (done) {
+    it('should catch only response chunks', function (done) {
+        var pipe = Trooba.use(function (pipe) {
+            pipe.on('request', function () {
+                pipe.streamResponse('response')
+                    .write('foo')
+                    .write('bar')
+                    .end();
+            });
+        })
+        .build()
+        .on('response', function (response) {
+            Assert.equal('response', response);
+        });
+
+        var reqData = [];
+        pipe.request('request').on('response:data', function (data, next) {
+            reqData.push(data);
+            next();
+        });
+        pipe.once('response:end', function (data) {
+            Assert.deepEqual(['foo', 'bar', undefined], reqData);
+            done();
+        });
 
     });
 
-    it.skip('should handle only responses', function (done) {
+    it('should catch all response messages', function (done) {
+        var pipe = Trooba.use(function (pipe) {
+            pipe.on('request', function () {
+                pipe.streamResponse('response')
+                    .write('foo')
+                    .write('bar')
+                    .end();
+            });
+        })
+        .build();
+
+        var reqData = [];
+        pipe.request('request').on('*', function (message, next) {
+            reqData.push(message.ref);
+            next();
+        });
+        pipe.once('response:end', function (data) {
+            Assert.deepEqual(['response', 'foo', 'bar', undefined], reqData);
+            done();
+        });
 
     });
 
-    it.skip('should replace response', function (done) {
+    it('should catch all messages', function (done) {
+        var messages = [];
+        var pipe = Trooba
+        .use(function catchhAll(pipe) {
+            pipe.on('*', function (message, next) {
+                messages.push(message.ref);
+                next && next();
+            });
+        })
+        .use(function (pipe) {
+            pipe.on('request', function () {
+                pipe.streamResponse('response')
+                    .write('foo')
+                    .write('bar')
+                    .end();
+            });
+        })
+        .build().request('request');
+
+        pipe.once('response:end', function (data) {
+            Assert.deepEqual(['request', 'response', 'foo', 'bar', undefined], messages);
+            done();
+        });
 
     });
 
-    it.skip('should replace error', function (done) {
+    it('should handle error after a few chunks', function (done) {
+        var pipe = Trooba.use(function (pipe) {
+            pipe.on('request', function () {
+                pipe.streamResponse('response')
+                    .write('foo')
+                    .write('bar');
+                setTimeout(function () {
+                    pipe.throw(new Error('Boom'));
+                }, 10);
+            });
+        })
+        .build()
+        .on('response', function (response) {
+            Assert.equal('response', response);
+        });
+
+        var count = 0;
+        pipe.request('request').on('response:data', function (data, next) {
+            count++;
+            next();
+        });
+        pipe.once('response:end', function (data) {
+            done(new Error('Should never happen'));
+        });
+        pipe.once('error', function (err) {
+            Assert.equal('Boom', err.message);
+            Assert.equal(2, count);
+            done();
+        });
 
     });
 
     it('should throw errer on way back', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.reply('bad content');
-            };
+        Trooba
+        .use(function handler(pipe) {
+            pipe.on('response', function () {
+                pipe.throw(new Error('Test'));
+            });
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.next()
-                    .on('response', function () {
-                        requestPipe.throw(new Error('Test'));
-                    });
-            };
+        .use(function tr(pipe) {
+            pipe.on('request', function () {
+                pipe.respond('bad content');
+            });
         })
-        .create({
+        .build({
             retry: 2
-        })({
+        }).request({
             order: []
         }, function validateResponse(err, response) {
             Assert.ok(err);
@@ -711,19 +1708,18 @@ describe(__filename, function () {
     });
 
     it('should handle empty reply', function (done) {
-        Trooba.transport(function (config) {
-            return function tr(requestPipe) {
-                requestPipe.reply();
-            };
+        Trooba
+        .use(function handler(pipe) {
         })
-        .use(function factory() {
-            return function handler(requestPipe) {
-                requestPipe.next();
-            };
+        .use(function tr(pipe) {
+            pipe.on('request', function () {
+                pipe.respond();
+            });
         })
-        .create({
+        .build({
             retry: 2
-        })({
+        })
+        .request({
             order: []
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -732,64 +1728,51 @@ describe(__filename, function () {
         });
     });
 
+    it('should handle multiple calls without conflicts', function (done) {
+        var pipe = Trooba
+        .use(function handler(pipe) {
+            // noop
+        })
+        .use(function tr(pipe) {
+            pipe.on('request', function (request) {
+                pipe.respond(request);
+            });
+        })
+        .build({
+            retry: 2
+        });
+
+        pipe.create().request({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.ok(!err);
+            Assert.deepEqual({foo:'bar'}, response);
+
+            pipe.create().request({
+                foo: 'qaz'
+            }, function validateResponse(err, response) {
+                Assert.ok(!err);
+                Assert.deepEqual({foo:'qaz'}, response);
+                done();
+            });
+        });
+    });
+
     it('should expose transport API', function (done) {
         function factory() {
-            function tr(requestPipe) {
-
+            function tr(pipe) {
+                pipe.set('api', function (pipe) {
+                    return {
+                        hello: function () {},
+                        bye: function () {}
+                    };
+                });
             }
-
-            tr.api = function () {
-                return {
-                    hello: function () {},
-                    bye: function () {}
-                };
-            };
 
             return tr;
         }
 
-        var client = Trooba.transport(factory).create();
-        Assert.ok(client.hello);
-        Assert.ok(client.bye);
-        done();
-    });
-
-    it('should expose transport API via interface', function (done) {
-        function factory() {
-            return function tr(requestPipe) {
-
-            };
-        }
-
-        var client = Trooba.interface(function () {
-            return {
-                hello: function () {},
-                bye: function () {}
-            };
-        }).transport(factory).create();
-        Assert.ok(client.hello);
-        Assert.ok(client.bye);
-        done();
-    });
-
-    it('should expose transport API with config via interface', function (done) {
-        function factory() {
-            return function tr(requestPipe) {
-
-            };
-        }
-
-        var client = Trooba.interface(function (config) {
-            return function api(pipe) {
-                Assert.equal('bar', config.foo);
-                return {
-                    hello: function () {},
-                    bye: function () {}
-                };
-            };
-        }, {
-            foo: 'bar'
-        }).transport(factory).create();
+        var client = Trooba.use(factory()).build('api');
         Assert.ok(client.hello);
         Assert.ok(client.bye);
         done();
@@ -797,45 +1780,51 @@ describe(__filename, function () {
 
     it('should call transport API and return runtime context', function () {
         function factory() {
-            function tr(requestPipe) {
-                requestPipe.reply(requestPipe.context.type +
-                    ' ' + requestPipe.context.request);
-            }
+            function tr(pipe) {
+                pipe.on('request', function (request) {
+                    setTimeout(function () {
+                        pipe.respond(pipe.context.type +
+                            ' ' + request);
+                    }, 10);
+                });
 
-            tr.api = function (pipe) {
-                return {
-                    hello: function (name, callback) {
-                        return pipe({
-                            request: name,
-                            type: 'hello'
-                        })
-                        .on('error', callback)
-                        .on('response', callback.bind(null, null));
-                    },
-                    bye: function (name, callback) {
-                        return pipe({
-                            request: name,
-                            type: 'bye'
-                        })
-                        .on('error', callback)
-                        .on('response', callback.bind(null, null));
-                    }
-                };
-            };
+                pipe.set('api', function (pipe) {
+                    return {
+                        hello: function (name, callback) {
+                            return pipe
+                            .create({
+                                type: 'hello'
+                            })
+                            .on('error', callback)
+                            .on('response', callback.bind(null, null))
+                            .request(name);
+                        },
+                        bye: function (name, callback) {
+                            return pipe
+
+                            .create({
+                                type: 'bye'
+                            })
+                            .on('error', callback)
+                            .on('response', callback.bind(null, null))
+                            .request(name)
+                            ;
+                        }
+                    };
+                });
+            }
 
             return tr;
         }
 
-        var client = Trooba.transport(factory).create();
-        var ctx1 = client.hello('John', function (err, response) {
+        var client = Trooba.use(factory()).build('api');
+        client.hello('John', function (err, response) {
             Assert.equal('hello John', response);
         });
-        Assert.ok(ctx1.context.request);
 
-        var ctx2 = client.hello('Bob', function (err, response) {
+        client.hello('Bob', function (err, response) {
             Assert.equal('hello Bob', response);
         });
-        Assert.ok(ctx2.context.request);
 
         client.bye('John', function (err, response) {
             Assert.equal('bye John', response);
@@ -846,84 +1835,32 @@ describe(__filename, function () {
         });
     });
 
-    it('should setup transport API via interface, do call and return runtime context', function (done) {
-        function factory() {
-            function tr(requestPipe) {
-                requestPipe.reply(requestPipe.context.type +
-                    ' ' + requestPipe.context.request);
-            }
-
-            return tr;
-        }
-
-        function api(pipe) {
-            return {
-                hello: function (name, callback) {
-                    return pipe({
-                        request: name,
-                        type: 'hello'
-                    }).on('response', function onResponse(response) {
-                        callback(null, response);
-                    });
-                },
-                bye: function (name, callback) {
-                    return pipe({
-                        request: name,
-                        type: 'bye'
-                    }).on('response', function onResponse(response) {
-                        callback(null, response);
-                    });
-                }
-            };
-        }
-
-        var client = Trooba.transport(factory).interface(api).create();
-        var pipeRequest1 = client.hello('John', function (err, response) {
-            Assert.equal('hello John', response);
-        });
-        Assert.ok(pipeRequest1.context.request);
-
-        var pipeRequest2 = client.hello('Bob', function (err, response) {
-            Assert.equal('hello Bob', response);
-        });
-        Assert.ok(pipeRequest2.context.request);
-
-        client.bye('John', function (err, response) {
-            Assert.equal('bye John', response);
-
-            client.bye('Bob', function (err, response) {
-                Assert.equal('bye Bob', response);
-                done();
-            });
-        });
-    });
-
-
     it('should handle mock trasport', function (done) {
         function factory() {
-            var tra = function tra(requestPipe) {
-                requestPipe.reply({
-                    qaz: 'wer'
+            var tra = function tra(pipe) {
+                pipe.on('request', function () {
+                    pipe.respond({
+                        qaz: 'wer'
+                    });
                 });
-            };
 
-            tra.api = function api(pipe) {
-                return {
-                    request: function (req, callback) {
-                        return pipe({
-                            request: req
-                        })
-                        .on('response', function onResponse(response) {
-                            callback(null, response);
-                        });
-                    }
-                };
+                pipe.set('api', function api(pipe) {
+                    return {
+                        request: function (req, callback) {
+                            return pipe.create()
+                            .on('response', function onResponse(response) {
+                                callback(null, response);
+                            })
+                            .request(req);
+                        }
+                    };
+                });
             };
 
             return tra;
         }
 
-        var client = Trooba.transport(factory).create();
+        var client = Trooba.use(factory()).build('api');
 
         client.request({
             foo: 'bar'

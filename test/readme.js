@@ -49,14 +49,14 @@ describe(__filename, function () {
                     req.end();
                 });
 
-                pipe.set('api', pipe => {
+                pipe.set('api', function (pipe) {
                     return {
-                        search: (name, callback) => {
+                        search: function search(name, callback) {
                             pipe.create()
-                            .on('error', err => {
+                            .on('error', function (err) {
                                 callback(err);
                             })
-                            .on('response', response => {
+                            .on('response', function (response) {
                                 callback(null, response.body);
                             })
                             .request({

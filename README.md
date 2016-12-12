@@ -317,7 +317,7 @@ function handlerFactory() {
 
 ```js
 function handlerFactory() {
-    return function handler(requestContext, action) {
+    return function handler(pipe) {
         pipe.on('response', function (response, next) {
             next();
         });

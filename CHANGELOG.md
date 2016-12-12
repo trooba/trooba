@@ -1,6 +1,8 @@
 # ChangeLog
 
 ## Next version
+
+## v1.0.0
 * Removed transport and interface to keep trooba more generic
   * Cutom API can be injected by the transport handler during init phase as part of context and requested as
   ```js

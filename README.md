@@ -1,5 +1,9 @@
 # trooba
 
+[![Build Status](https://travis-ci.org/trooba/trooba.svg?branch=master)](https://travis-ci.org/trooba/trooba) [![NPM](https://img.shields.io/npm/v/trooba.svg)](https://www.npmjs.com/package/trooba)
+[![Downloads](https://img.shields.io/npm/dm/trooba.svg)](http://npm-stat.com/charts.html?package=trooba)
+[![Known Vulnerabilities](https://snyk.io/test/github/trooba/trooba/badge.svg)](https://snyk.io/test/github/trooba/trooba)
+
 "Trooba" [tru:ba'] means "Pipe" in Russian
 
 ## What is it?

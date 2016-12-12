@@ -426,6 +426,70 @@ describe(__filename, function () {
             }
         });
 
+        it('should send error back if no target consumer found for the response', function (done) {
+            var order = [];
+            var domain = Domain.create();
+            domain.run(function () {
+                Trooba
+                .use(function handler(pipe) {
+                    order.push('zx1');
+                })
+                .use(function handler(pipe) {
+                    order.push('zx2');
+                })
+                .use(function handler(pipe) {
+                    pipe.on('request', function () {
+                        setImmediate(function () {
+                            pipe.respond('ok');
+                        });
+                    });
+                })
+                .build()
+                .set('strict', 'response')
+                .request({
+                    foo: 'bar'
+                });
+            });
+
+            domain.once('error', function (err) {
+                Assert.equal('No target consumer found for the response "ok"', err.message);
+                Assert.deepEqual(['zx1', 'zx2'], order);
+                done();
+            });
+        });
+
+        it('should send error back if no target consumer found for the response and other types', function (done) {
+            var order = [];
+            var domain = Domain.create();
+            domain.run(function () {
+                Trooba
+                .use(function handler(pipe) {
+                    order.push('zx1');
+                })
+                .use(function handler(pipe) {
+                    order.push('zx2');
+                })
+                .use(function handler(pipe) {
+                    pipe.on('request', function () {
+                        setImmediate(function () {
+                            pipe.respond('ok');
+                        });
+                    });
+                })
+                .build()
+                .set('strict', ['response'])
+                .request({
+                    foo: 'bar'
+                });
+            });
+
+            domain.once('error', function (err) {
+                Assert.equal('No target consumer found for the response "ok"', err.message);
+                Assert.deepEqual(['zx1', 'zx2'], order);
+                done();
+            });
+        });
+
         it('should throw error if no error handler is registered', function (done) {
             var domain = Domain.create();
             domain.run(function () {
@@ -651,6 +715,31 @@ describe(__filename, function () {
         });
     });
 
+    it('should send error back if no target consumer found for the request', function (done) {
+        var order = [];
+        Trooba
+        .use(function handler(pipe) {
+            order.push('zx1');
+        })
+        .use(function handler(pipe) {
+            order.push('zx2');
+        })
+        .use(function handler(pipe) {
+            order.push('zx3');
+        })
+        .build()
+        .set('strict', 'request')
+        .request({
+            foo: 'bar'
+        }, function validateResponse(err, response) {
+            Assert.ok(err);
+            Assert.equal('No target consumer found for the request {"foo":"bar"}', err.message);
+            Assert.equal(['zx1', 'zx2', 'zx3'].toString(),
+                order.toString());
+            done();
+        });
+    });
+
     it('should go full cycle with chunks', function (done) {
         var trCount = 0;
         var order = [];
@@ -759,23 +848,192 @@ describe(__filename, function () {
 
     });
 
-    it.skip('should link two pipes', function () {
+    it('should link two pipes, propagate request, response and do trace', function (done) {
+        var order = [];
+        var route = [];
+        var pipe1 = Trooba
+        .use(function h1_1(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p1-h1');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p1-h1');
+                next();
+            });
+        }, {
+            id: 'one'
+        })
+        .use(function h1_2(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p1-h2');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p1-h2');
+                next();
+            });
+        }, {
+            id: 'two'
+        })
+        .use(function tr(pipe) {
+            pipe.on('request', function onRequest(request) {
+                order.push('tr1');
+                pipe.respond({
+                    p: pipe.context.p,
+                    c: pipe.context.c,
+                    foo: request.foo
+                });
+            });
+        }, {
+            id: 'three'
+        })
+        .build({
+            p: 1,
+            c: 1
+        });
 
+        var pipe = Trooba
+        .use(function h2_1(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p2-h1');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p2-h1');
+                next();
+            });
+        }, {
+            id: 'four'
+        })
+        .use(pipe1, {
+            id: 'five'
+        })
+        .use(function h2_2(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p2-h2');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p2-h2');
+                next();
+            });
+        }, {
+            id: 'six'
+        })
+        .build({
+            p: 2
+        });
+
+        pipe.trace(function (message, pipePoint) {
+            route.push(pipePoint.handler.name);
+        }).request({
+            foo: 'bar'
+        })
+        .on('response', function (response) {
+            Assert.deepEqual([
+                'req-p2-h1',
+                'req-p1-h1',
+                'req-p1-h2',
+                'tr1',
+                'res-p1-h2',
+                'res-p1-h1',
+                'res-p2-h1'
+            ], order);
+            Assert.deepEqual({
+                p: 2,
+                c: 1,
+                foo: 'bar'
+            }, response);
+            Assert.deepEqual([
+                'h2_1',
+                'pipeConnect',
+                'h1_1',
+                'h1_2',
+                'tr',
+                'h1_2',
+                'h1_1',
+                'startPoint',
+                'h2_1',
+                'startPoint'
+            ], route);
+            done();
+        });
     });
 
-    it.skip('should link two pipes and propagate context', function () {
+    it('should link two pipes and propagate error', function (done) {
+        var order = [];
+        var pipe1 = Trooba
+        .use(function h1(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p1-h1');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p1-h1');
+                next();
+            });
+        })
+        .use(function h2(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p1-h2');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p1-h2');
+                next();
+            });
+        })
+        .use(function tr(pipe) {
+            pipe.on('request', function onRequest(request) {
+                order.push('tr1');
+                pipe.throw(new Error('boom'));
+            });
+        })
+        .build({
+            p: 1,
+            c: 1
+        });
 
-    });
+        Trooba
+        .use(function h1(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p2-h1');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p2-h1');
+                next();
+            });
+        })
+        .use(pipe1)
+        .use(function h2(pipe) {
+            pipe.on('request', function onRequest(request, next) {
+                order.push('req-p2-h2');
+                next();
+            });
+            pipe.on('response', function onRequest(request, next) {
+                order.push('res-p2-h2');
+                next();
+            });
+        })
+        .build({
+            p: 2
+        })
+        .request({
+            foo: 'bar'
+        })
+        .on('error', function (err) {
+            Assert.equal('boom', err.message);
+            Assert.deepEqual([
+                'req-p2-h1',
+                'req-p1-h1',
+                'req-p1-h2',
+                'tr1'
+            ], order);
 
-    it.skip('should link two pipes and propagate request', function () {
-
-    });
-
-    it.skip('should link two pipes and propagate response', function () {
-
-    });
-
-    it.skip('should link two pipes and propagate error', function () {
+            done();
+        });
 
     });
 

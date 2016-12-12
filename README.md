@@ -124,8 +124,11 @@ The pipe object is passed to all handlers and transport during initialization wh
 * **streamResponse**(responseObject) - initiates a response stream flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated. It returns write stream with methods:
     * **write(data)** write a chunk to the stream as "response:data" message
     * **end()** ends the stream and send "response:end" message
-* **send**(message) - sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
-* **context** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed. The values in the context that have their names started with '$' will not be propagated beyond the pipe boundaries
+* **send**(message) sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
+* **trace**([Function tracer(message, pipe)]) enables tracing for the messages. It is kind of a visitor pattern. The function will be called for any message going through every pipe point and you are free to use it in any way imaginable. One obvious option is to trace the route using a special message type or trace request/response route with request and response.
+* **context** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed. The values in the context that have their names started with '$' will not be propagated beyond the pipe boundaries.
+* **set**(name, value) sets arbitrary system key-value pair to the context which will not be explicitly propagated beyond transport boundaries as internally the name will be prefixed as $name. It is used to provide custom API by handlers.
+* **get**(name) reads system value from the context.
 
 #### Message
 
@@ -149,168 +152,6 @@ Example:
     "ref": "[Error: some error message]",
     "sync": true
 }
-```
-
-### Transport
-
-Transport is a handler that should provide an actual implementation of the corresponding protocol (http/grpc/soap/rest). Usually the request flow would be terminated at transport point and the response flow is initiated.
-
-It can also provide a custom API that cab be injected into context using pipe.set() end accessed using get() method.
-
-For example:
-```js
-var service = pipe.build('service:hello');
-service.hello('John');
-```
-
-#### Transport usage
-
-```js
-// throw error
-function transport(pipe, config) {
-    pipe.on('request', function (request) {
-        pipe.throw(new Error('Error'));
-    })
-}
-
-// reply with http response
-function transport(pipe, config) {
-    pipe.on('request', function (request) {
-        pipe.respond({
-            statusCode: 200,
-            body: 'ok'
-        });
-    })
-}
-
-// accessing context information
-function transport(pipe) {
-    // executed only once here for every request
-    console.log('context info:', pipe.context);
-    pipe.on('request', function () {
-        // or here
-        console.log('context info within request flow:', pipe.context);
-        pipe.respond('ok');
-    })
-}
-```
-
-#### Transport definition using http protocol as a base
-
-For a more advanced example, please see [trooba-http-transport](https://github.com/trooba/trooba-http-transport) module
-
-```js
-var Http = require('http');
-
-function transport(pipe, config) {
-    pipe.on('request', function (request) {
-        var options = Object.create(config);
-        options.path += '?' + Querystring.stringify(request);
-        // prepare request
-        var req = Http.request(options, function (res) {
-            var data = '';
-            res.setEncoding('utf8');
-            res.on('data', function (chunk) {
-                data += chunk;
-            });
-            res.on('end', function () {
-                res.body = data;
-                pipe.respond(res);
-            });
-        });
-
-        req.on('error', function (err) {
-            pipe.throw(err);
-        });
-
-        req.end();
-    });
-}
-
-var pipe = Trooba.use(transportFactory, {
-    protocol: 'https:',
-    hostname: 'www.google.com',
-    path: '/search?q=nike'
-}).build();
-
-// REQUEST execution
-// ========================================= //
-pipe.request({
-    q: 'nike'
-}, (err, response) => console.log);
-
-// or you can skip callback and listen to events
-// ========================================= //
-pipe.request({
-    q: 'nike'
-})
-.on('error', console.error)
-.on('response', console.log);
-// ========================================= //
-```
-
-#### Transport definition using http protocol and custom API
-
-```js
-function transportFactory() {
-    function transport(pipe, config) {
-        pipe.on('request', function (request) {
-            var qs = '?' + Querystring.stringify(request);
-            var options = {
-                protocol: config.protocol,
-                hostname: config.hostname,
-                path: config.path ?
-                    config.path += qs : qs
-            };
-            // prepare request
-            var req = Http.request(options, function (res) {
-                var data = '';
-                res.setEncoding('utf8');
-                res.on('data', function (chunk) {
-                    data += chunk;
-                });
-                res.on('end', function () {
-                    res.body = data;
-                    pipe.respond(res);
-                });
-            });
-
-            req.on('error', function (err) {
-                pipe.throw(err);
-            });
-
-            req.end();
-        });
-
-        pipe.set('client', function clientFactory(pipe) {
-            return {
-                search: (name, callback) => {
-                    pipe.create()
-                    .on('error', err => {
-                        callback(err);
-                    })
-                    .on('response', response => {
-                        callback(null, response.body);
-                    })
-                    .request({
-                        q: name
-                    });
-                }
-            };
-        });
-    }
-
-
-    return transport;
-}
-
-var client = Trooba.use(transportFactory(), {
-    protocol: 'http:',
-    hostname: 'www.google.com',
-    path: '/search'
-}).build('client');
-
-client.search('nike', console.log);
 ```
 
 ### Handler definition
@@ -483,12 +324,10 @@ function handlerFactory() {
 ##### Continue an existing request flow
 
 ```js
-function handlerFactory() {
-    return function handler(requestContext, action) {
-        pipe.on('request', function (request, next) {
-            next();
-        })
-    };
+function handler(pipe) {
+    pipe.on('request', function (request, next) {
+        next();
+    })
 }
 ```
 
@@ -520,18 +359,6 @@ function retry(pipe, config) {
 }
 
 // mock transport
-function mockTransportFactory(config) {
-    var count = 1;
-    return function mock(requestContext, action) {
-        // first generate error
-        if (count-- > 0) {
-            return action.reply(new Error('Test error'));
-        }
-        action.reply(null, 'some text');
-    };
-}
-
-// mock transport
 function createMockTransport() {
     var count = 1;
     return function mock(pipe) {
@@ -556,6 +383,209 @@ client.request({}, function (err, response) {
     Assert.equal(1, retryCounter);
     done();
 });
+```
+
+### Tracing
+
+The framework allows to trace any and all messages.
+Useful when the complexity of the pipeline requires one to check the route the message travels.
+
+```js
+var route = [];
+
+Trooba
+.use(function h1(pipe) {
+})
+.use(function h2(pipe) {
+})
+.use(function tr(pipe) {
+    pipe.on('request', function () {
+        pipe.respond('response')
+    })
+})
+.build()
+.trace(function (message, pipePoint) {
+    route.push(pipePoint.handler.name);
+})
+.request('request', function () {
+    console.log(route);
+});
+```
+
+### Enforcing delivery
+
+To make sure a specific message type or request/response reach the destination, one can use set('strict', type) fpr one type or an array of types.
+
+```js
+Trooba
+.use()
+.build()
+.set('strict', ['request', 'response'])
+.request('request', function () {
+    console.log(route);
+});
+```
+
+### Transport
+
+Transport is a handler that should provide an actual implementation of the corresponding protocol (http/grpc/soap/rest). Usually the request flow would be terminated at transport point and the response flow is initiated.
+
+It can also provide a custom API that cab be injected into context using pipe.set() end accessed using get() method.
+
+For example:
+```js
+var service = pipe.build('service:hello');
+service.hello('John');
+```
+
+#### Transport usage
+
+```js
+// throw error
+function transport(pipe, config) {
+    pipe.on('request', function (request) {
+        pipe.throw(new Error('Error'));
+    })
+}
+
+// reply with http response
+function transport(pipe, config) {
+    pipe.on('request', function (request) {
+        pipe.respond({
+            statusCode: 200,
+            body: 'ok'
+        });
+    })
+}
+
+// accessing context information
+function transport(pipe) {
+    // executed only once here for every request
+    console.log('context info:', pipe.context);
+    pipe.on('request', function () {
+        // or here
+        console.log('context info within request flow:', pipe.context);
+        pipe.respond('ok');
+    })
+}
+```
+
+#### Transport definition using http protocol as a base
+
+For a more advanced example, please see [trooba-http-transport](https://github.com/trooba/trooba-http-transport) module
+
+```js
+var Http = require('http');
+
+function transport(pipe, config) {
+    pipe.on('request', function (request) {
+        var options = Object.create(config);
+        options.path += '?' + Querystring.stringify(request);
+        // prepare request
+        var req = Http.request(options, function (res) {
+            var data = '';
+            res.setEncoding('utf8');
+            res.on('data', function (chunk) {
+                data += chunk;
+            });
+            res.on('end', function () {
+                res.body = data;
+                pipe.respond(res);
+            });
+        });
+
+        req.on('error', function (err) {
+            pipe.throw(err);
+        });
+
+        req.end();
+    });
+}
+
+var pipe = Trooba.use(transportFactory, {
+    protocol: 'https:',
+    hostname: 'www.google.com',
+    path: '/search?q=nike'
+}).build();
+
+// REQUEST execution
+// ========================================= //
+pipe.request({
+    q: 'nike'
+}, (err, response) => console.log);
+
+// or you can skip callback and listen to events
+// ========================================= //
+pipe.request({
+    q: 'nike'
+})
+.on('error', console.error)
+.on('response', console.log);
+// ========================================= //
+```
+
+#### Transport definition using http protocol and custom API
+
+```js
+function transportFactory() {
+    function transport(pipe, config) {
+        pipe.on('request', function (request) {
+            var qs = '?' + Querystring.stringify(request);
+            var options = {
+                protocol: config.protocol,
+                hostname: config.hostname,
+                path: config.path ?
+                    config.path += qs : qs
+            };
+            // prepare request
+            var req = Http.request(options, function (res) {
+                var data = '';
+                res.setEncoding('utf8');
+                res.on('data', function (chunk) {
+                    data += chunk;
+                });
+                res.on('end', function () {
+                    res.body = data;
+                    pipe.respond(res);
+                });
+            });
+
+            req.on('error', function (err) {
+                pipe.throw(err);
+            });
+
+            req.end();
+        });
+
+        pipe.set('client', function clientFactory(pipe) {
+            return {
+                search: (name, callback) => {
+                    pipe.create()
+                    .on('error', err => {
+                        callback(err);
+                    })
+                    .on('response', response => {
+                        callback(null, response.body);
+                    })
+                    .request({
+                        q: name
+                    });
+                }
+            };
+        });
+    }
+
+
+    return transport;
+}
+
+var client = Trooba.use(transportFactory(), {
+    protocol: 'http:',
+    hostname: 'www.google.com',
+    path: '/search'
+}).build('client');
+
+client.search('nike', console.log);
 ```
 
 ## Examples

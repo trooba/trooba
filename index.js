@@ -15,10 +15,11 @@ Trooba.prototype = {
         }
 
         if (handler instanceof PipePoint) {
-            var point = handler;
+            var pipeTo = handler;
             handler = function pipeConnect(pipe) {
-                pipe.on('*', point.send);
-                point.on('*', pipe.send);
+                pipeTo = pipeTo.create(pipe.context);
+                pipe.on('*', pipeTo.send.bind(pipeTo));
+                pipeTo.on('*', pipe.send.bind(pipe));
             };
         }
 
@@ -51,19 +52,9 @@ Trooba.prototype = {
     }
 };
 
-module.exports.transport = function createWithTransport(transport, config) {
-    var trooba = new Trooba();
-    return trooba.transport(transport, config);
-};
-
 module.exports.use = function createWithHandler(handler, config) {
     var trooba = new Trooba();
     return trooba.use(handler, config);
-};
-
-module.exports.interface = function createWithInterface(api, config) {
-    var trooba = new Trooba();
-    return trooba.interface(api, config);
 };
 
 function buildPipe(handlers) {
@@ -88,7 +79,7 @@ var Types = {
     REQUEST: 1,
     RESPONSE: 2
 };
-module.exports.Type = Types;
+module.exports.Types = Types;
 
 /*
 * Channel point forms a linked list node
@@ -127,11 +118,16 @@ PipePoint.prototype = {
         else if (message.type === 'error') {
             throw message.ref;
         }
+        else if (message.context.$strict &&
+            message.context.$strict.indexOf(message.type) !== -1) {
+            this.copy(message.context).throw(new Error('No target consumer found for the ' +
+                message.type + ' ' + JSON.stringify(message.ref)));
+        }
 
         return this;
     },
 
-    copy: function copy$() {
+    copy: function copy$(context) {
         var ret = new PipePoint();
         ret.next = this.next;
         ret.prev = this.prev;
@@ -139,11 +135,19 @@ PipePoint.prototype = {
         ret._messageHandlers = this._messageHandlers;
         ret.config = this.config;
         ret.handler = this.handler;
+        ret.context = context;
         return ret;
+    },
+
+    trace: function trace(tracer) {
+        this.context.trace = true;
+        this.context.$tracer = tracer;
+        return this;
     },
 
     set: function set(name, value) {
         this.context['$'+name] = value;
+        return this;
     },
 
     get: function get(name) {
@@ -164,6 +168,9 @@ PipePoint.prototype = {
             point.handler(point, point.config);
         }
         else {
+            if (message.context.trace && message.context.$tracer) {
+                message.context.$tracer(message, point);
+            }
             // handle the hooks
             messageHandlers = this.handlers(message.context);
             var anyType;
@@ -177,7 +184,7 @@ PipePoint.prototype = {
                 processMessage(anyType ? message : message.ref,
                     message.sync ? undefined : onComplete);
                 if (!message.sync) {
-                    // on complete has continued the flow
+                    // on complete would continued the flow
                     return;
                 }
             }

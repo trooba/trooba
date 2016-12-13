@@ -16,7 +16,7 @@ It uses a stateless generic pipeline/bus used to route multiple requests in "par
 
 It is not another http based server framework like express, koa or hapi. It can be used to build a pipline for those as it is protocol free and allows to specify any transport one needs. For example see [examples](#examples)
 
-## What it can do for you?
+## What can it do for you?
 
 * Define a pipeline of handlers and execute it
     * The handlers are executed in order they were added.

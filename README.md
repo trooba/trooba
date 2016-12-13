@@ -30,7 +30,7 @@ It is not another http based server framework like express, koa or hapi. It can 
 * Customize API returned by pipe.build(customApiName) method mostly useful to provide a protocol specific API, for example, gRPC can expose API defined in proto file or soap defined by wsdl.
 * Support for request/response, pub/sub or a mix of the modes
 
-![pipeline flow](./docs/images/arch2.png)
+![pipeline flow](./docs/images/arch3.png)
 
 ## Install
 

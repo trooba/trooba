@@ -27,7 +27,7 @@ It is not another http based server framework like express, koa or hapi. It can 
     * The request object is passed from transport through a set of handlers before getting to the controller
     * The response object is passed in the reversed order from the controller defined by the user through a set of handlers to the transport of the service.
 * Set transport handler or a set of them in the fallback order (http, soap, grpc, mock or custom) for a pipeline
-* Customize API returned by pipe.build(customApiName) method mostly useful to provide a protocol specific API, for example, gRPC can expose API defined in proto file or soap defined by wsdl.
+* Customize API returned by pipe.build(customApiName) method mostly useful to provide a protocol specific API, for example, gRPC can expose API defined in proto file or soap API defined by wsdl.
 * Support for request/response, pub/sub or a mix of the modes
 
 ![pipeline flow](./docs/images/arch3.png)

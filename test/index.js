@@ -1553,33 +1553,38 @@ describe(__filename, function () {
         });
     });
 
-    it('should catch only request chunks', function (done) {
+    it('should catch only request chunks and provide hook at stream level', function (done) {
         var pipe = Trooba.use(function (pipe) {
             var reqData = [];
+            Assert.ok(!pipe.context.$requestStream);
             pipe.on('request:data', function (data, next) {
+                Assert.ok(pipe.context.$requestStream);
                 reqData.push(data);
                 next();
             });
             pipe.once('request:end', function (data) {
-                pipe.respond(reqData);
+                setImmediate(function () {
+                    pipe.respond(reqData);
+                });
             });
         })
         .build()
-        .on('response', function (response) {
-            Assert.deepEqual(['foo', 'bar', undefined], response);
-            done();
-        });
+        ;
 
         pipe.streamRequest('request')
             .write('foo')
             .write('bar')
-            .end();
-
+            .end()
+            .on('response', function (response) {
+                Assert.deepEqual(['foo', 'bar', undefined], response);
+                done();
+            });
     });
 
     it('should catch only response chunks', function (done) {
         var pipe = Trooba.use(function (pipe) {
             pipe.on('request', function () {
+                Assert.ok(!pipe.context.$responseStream);
                 pipe.streamResponse('response')
                     .write('foo')
                     .write('bar')
@@ -1593,6 +1598,7 @@ describe(__filename, function () {
 
         var reqData = [];
         pipe.request('request').on('response:data', function (data, next) {
+            Assert.ok(pipe.context.$responseStream);
             reqData.push(data);
             next();
         });

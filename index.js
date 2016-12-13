@@ -23,7 +23,7 @@ Trooba.prototype = {
             };
         }
 
-        this._handlers.unshift({
+        this._handlers.push({
             handler: handler,
             config: config
         });
@@ -39,7 +39,7 @@ Trooba.prototype = {
         var pipe = this._pipe;
         if (!pipe) {
             var handlers = this._handlers.slice();
-            handlers.push(function startPoint() {});
+            handlers.unshift(function startPoint() {});
             pipe = this._pipe = buildPipe(handlers);
         }
 
@@ -58,17 +58,21 @@ module.exports.use = function createWithHandler(handler, config) {
 };
 
 function buildPipe(handlers) {
-    return handlers.reduce(function reduce(next, handlerMeta) {
-        return createPipePoint(handlerMeta, next);
+    var head;
+    handlers.reduce(function reduce(prev, handlerMeta) {
+        var point = createPipePoint(handlerMeta, prev);
+        head = head || point;
+        return point;
     }, undefined);
+    return head;
 }
 module.exports.buildPipe = buildPipe;
 
-function createPipePoint(handler, next) {
+function createPipePoint(handler, prev) {
     var point = new PipePoint(handler);
-    point.next = next;
-    if (next) {
-        next.prev = point;
+    if (prev) {
+        point.prev = prev;
+        prev.next = point;
     }
     return point;
 }
@@ -141,7 +145,7 @@ PipePoint.prototype = {
 
     trace: function trace(tracer) {
         this.context.trace = true;
-        this.context.$tracer = tracer;
+        this.context.tracer$ = tracer;
         return this;
     },
 
@@ -168,8 +172,8 @@ PipePoint.prototype = {
             point.handler(point, point.config);
         }
         else {
-            if (message.context.trace && message.context.$tracer) {
-                message.context.$tracer(message, point);
+            if (message.context.trace && message.context.tracer$) {
+                message.context.tracer$(message, point);
             }
             // handle the hooks
             messageHandlers = this.handlers(message.context);
@@ -262,10 +266,20 @@ PipePoint.prototype = {
     streamRequest: function streamRequest$(request) {
         this.context.$requestStream = true;
         var point = this.request(request);
-        return createWriteStream({
+        var writeStream = createWriteStream({
             channel: point,
             flow: Types.REQUEST
         });
+        writeStream.on = function onHook(type, handler) {
+            point.on(type, handler);
+            return writeStream;
+        };
+        writeStream.once = function onHook(type, handler) {
+            point.once(type, handler);
+            return writeStream;
+        };
+        point.context.$requestStream = writeStream;
+        return writeStream;
     },
 
     request: function request$(request, callback) {
@@ -311,7 +325,7 @@ PipePoint.prototype = {
         this.context.$responseStream = true;
         var point = this.respond(response);
 
-        return createWriteStream({
+        return this.context.$responseStream = createWriteStream({
             channel: point,
             flow: Types.RESPONSE
         });

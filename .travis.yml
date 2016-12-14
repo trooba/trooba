@@ -5,5 +5,10 @@ node_js:
 - "6"
 - "7"
 language: node_js
-script: "npm test"
-sudo: false
+install:
+- npm install
+- npm install -g codecov istanbul
+script:
+- npm test
+- istanbul cover ./node_modules/mocha/bin/_mocha --report lcovonly -- -R spec
+- codecov

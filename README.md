@@ -1,5 +1,6 @@
 # trooba
 
+[![codecov](https://codecov.io/gh/trooba/trooba/branch/master/graph/badge.svg)](https://codecov.io/gh/trooba/trooba)
 [![Build Status](https://travis-ci.org/trooba/trooba.svg?branch=master)](https://travis-ci.org/trooba/trooba) [![NPM](https://img.shields.io/npm/v/trooba.svg)](https://www.npmjs.com/package/trooba)
 [![Downloads](https://img.shields.io/npm/dm/trooba.svg)](http://npm-stat.com/charts.html?package=trooba)
 [![Known Vulnerabilities](https://snyk.io/test/github/trooba/trooba/badge.svg)](https://snyk.io/test/github/trooba/trooba)
@@ -31,6 +32,15 @@ It is not another http based server framework like express, koa or hapi. It can 
 * Support for request/response, pub/sub or a mix of the modes
 
 ![pipeline flow](./docs/images/arch3.png)
+
+# Get Involved
+
+- **Contributing**: Pull requests are welcome!
+    - Read [`CONTRIBUTING.md`](.github/CONTRIBUTING.md) and check out our [bite-sized](https://github.com/trooba/trooba/issues?q=is%3Aissue+is%3Aopen+label%3Adifficulty%3Abite-sized) and [help-wanted](https://github.com/trooba/trooba/issues?q=is%3Aissue+is%3Aopen+label%3Astatus%3Ahelp-wanted) issues
+    - Submit github issues for any feature enhancements, bugs or documentation problems
+- **Support**: Join our [gitter chat](https://gitter.im/trooba) to ask questions to get support from the maintainers and other Trooba developers
+    - Questions/comments can also be posted as [github issues](https://github.com/trooba/trooba/issues)
+
 
 ## Install
 
@@ -599,9 +609,9 @@ client.search('nike', console.log);
 Based on [trooba-xhr-transport](https://github.com/trooba/trooba-xhr-transport)
 
 ```js
-var xhrTransportFactory = require('trooba-xhr-transport');
+var xhrTransport = require('trooba-xhr-transport');
 require('trooba')
-    .use(xhrTransportFactory, {
+    .use(xhrTransport, {
         protocol: 'http:',
         hostname: 'myapi.service.xyz'
         socketTimeout: 1000
@@ -622,7 +632,7 @@ Based on [trooba-http-transport](https://github.com/trooba/trooba-http-transport
 
 ```js
 require('trooba')
-    .use(httpTransportFactory, {
+    .use(httpTransport, {
         protocol: 'http:',
         hostname: 'www.google.com',
         connectTimeout: 100,
@@ -643,10 +653,10 @@ require('trooba')
 Based on [trooba-grpc-transport](https://github.com/trooba/trooba-grpc-transport)
 
 ```js
-var grpcTransportFactory = require('trooba-grpc-transport');
+var grpcTransport = require('trooba-grpc-transport');
 
 require('trooba')
-    .use(grpcTransportFactory, {
+    .use(grpcTransport, {
         protocol: 'http:',
         hostname: 'grpc.service.my',
         port: 50001,

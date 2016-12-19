@@ -157,7 +157,8 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -848,7 +849,7 @@ describe(__filename, function () {
 
     });
 
-    it('should link two pipes, propagate request, response and do trace', function (done) {
+    it('should link two pipes via "use", propagate request, response and do trace', function (done) {
         var order = [];
         var route = [];
         var pipe1 = Trooba
@@ -925,8 +926,8 @@ describe(__filename, function () {
             p: 2
         });
 
-        pipe.trace(function (message, pipePoint) {
-            route.push(pipePoint.handler.name);
+        pipe.tracer(function (message, pipePoint) {
+            route.push(pipePoint.handler.name + (message.flow === 1 ? '-req' : '-res'));
         }).request({
             foo: 'bar'
         })
@@ -946,22 +947,22 @@ describe(__filename, function () {
                 foo: 'bar'
             }, response);
             Assert.deepEqual([
-                'h2_1',
-                'pipeConnect',
-                'h1_1',
-                'h1_2',
-                'tr',
-                'h1_2',
-                'h1_1',
-                'startPoint',
-                'h2_1',
-                'startPoint'
+                'h2_1-req',
+                'pipeConnect-req',
+                'h1_1-req',
+                'h1_2-req',
+                'tr-req',
+                'h1_2-res',
+                'h1_1-res',
+                'pipeConnect-res',
+                'h2_1-res',
+                'pipeHead-res'
             ], route);
             done();
         });
     });
 
-    it('should link two pipes and propagate error', function (done) {
+    it.skip('should link two pipes and propagate error', function (done) {
         var order = [];
         var pipe1 = Trooba
         .use(function h1(pipe) {
@@ -1621,11 +1622,12 @@ describe(__filename, function () {
         .build();
 
         var reqData = [];
-        pipe.request('request').on('*', function (message, next) {
+        pipe.request('request')
+        .on('*', function (message, next) {
             reqData.push(message.ref);
             next();
-        });
-        pipe.once('response:end', function (data) {
+        })
+        .once('response:end', function (data) {
             Assert.deepEqual(['response', 'foo', 'bar', undefined], reqData);
             done();
         });
@@ -1877,4 +1879,707 @@ describe(__filename, function () {
 
     });
 
+    describe('links', function () {
+        var pipeFoo;
+        var pipeBar;
+        var order;
+
+        it('should create and trace pipeFoo', function (next) {
+            order = [];
+
+            pipeFoo = Trooba
+            .use(function foo1(pipe) {
+                order.push('foo1');
+            })
+            .build();
+
+            Assert.deepEqual([
+                'foo1'
+            ], order);
+
+            pipeFoo.trace(function (err, list) {
+                Assert.deepEqual([
+                    'pipeHead-req',
+                    'foo1-req',
+                    'foo1-res',
+                    'pipeHead-res'
+                ], list.map(function (p) {return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');}));
+                next();
+            });
+        });
+
+        it('should insert one-point pipe to one-point pipe and trace it', function (next) {
+            order = [];
+
+            pipeBar = Trooba
+            .use(function bar1(pipe) {
+                order.push('bar1');
+            })
+            .build();
+
+            Assert.deepEqual([
+                'bar1',
+            ], order);
+
+            pipeFoo = pipeFoo.create();
+            pipeFoo.next.link(pipeBar);
+
+            pipeFoo.trace(function (err, list) {
+                Assert.deepEqual([
+                    'pipeHead-req',
+                    'foo1-req',
+                    'bar1-req',
+                    'bar1-res',
+                    'foo1-res',
+                    'pipeHead-res'
+                ], list.map(function (p) {
+                    return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');
+                }));
+                next();
+            });
+
+        });
+
+        it('should trace pipeBar', function (next) {
+            pipeBar.trace(function (err, list) {
+                Assert.deepEqual([
+                    'pipeHead-req',
+                    'bar1-req',
+                    'bar1-res',
+                    'pipeHead-res'
+                ], list.map(function (p) {
+                    return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');
+                }));
+                next();
+            });
+
+        });
+
+        it('should fail to re-insert pipe where it is already added', function (next) {
+            Assert.throws(function () {
+                pipeFoo.next.link(pipeBar);
+            }, /The hook has already been registered, you can use only one hook for specific event type: */);
+            next();
+        });
+
+        it('should create new context with pipeFoo and trace it', function (next) {
+            order = [];
+            pipeFoo = pipeFoo.create();
+            Assert.deepEqual([
+                'foo1'
+            ], order);
+
+            pipeFoo.trace(function (err, list) {
+                Assert.deepEqual([
+                    'pipeHead-req',
+                    'foo1-req',
+                    'foo1-res',
+                    'pipeHead-res'
+                ], list.map(function (p) {
+                    return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');
+                }));
+                next();
+            });
+        });
+
+        it('should insert long pipe to one-element pipe, context flow', function (next) {
+            // link to other pipe
+            var pipeQaz = Trooba
+            .use(function qaz1(pipe) {
+                order.push('qaz1');
+            })
+            .use(function qaz2(pipe) {
+                order.push('qaz2');
+            })
+            .use(function qaz3(pipe) {
+                order.push('qaz3');
+            })
+            .build();
+
+            pipeFoo = pipeFoo.create();
+            pipeFoo.next.link(pipeQaz);
+
+            pipeFoo.trace(function (err, list) {
+                Assert.deepEqual([
+                    'pipeHead-req',
+                    'foo1-req',
+                    'qaz1-req',
+                    'qaz2-req',
+                    'qaz3-req',
+                    'qaz3-res',
+                    'qaz2-res',
+                    'qaz1-res',
+                    'foo1-res',
+                    'pipeHead-res'
+                ], list.map(function (p) {
+                    return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');
+                }));
+                next();
+            });
+        });
+
+        it('should insert long pipe to other long pipe, context flow', function (next) {
+            pipeFoo = Trooba
+            .use(function foo1(pipe) {
+                order.push('foo1');
+            })
+            .use(function foo2(pipe) {
+                order.push('foo2');
+            })
+            .use(function foo3(pipe) {
+                order.push('foo3');
+            })
+            .build();
+
+            // link to other pipe
+            var pipeQaz = Trooba
+            .use(function qaz1(pipe) {
+                order.push('qaz1');
+            })
+            .use(function qaz2(pipe) {
+                order.push('qaz2');
+            })
+            .use(function qaz3(pipe) {
+                order.push('qaz3');
+            })
+            .build();
+
+            pipeFoo.next.link(pipeQaz);
+
+            pipeFoo.trace(function (err, list) {
+                Assert.deepEqual([
+                    'pipeHead-req',
+                    'foo1-req',
+                    'qaz1-req',
+                    'qaz2-req',
+                    'qaz3-req',
+                    'foo2-req',
+                    'foo3-req',
+                    'foo3-res',
+                    'foo2-res',
+                    'qaz3-res',
+                    'qaz2-res',
+                    'qaz1-res',
+                    'foo1-res',
+                    'pipeHead-res'
+                ], list.map(function (p) {
+                    return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');
+                }));
+                next();
+            });
+        });
+
+        it('should propagate request in pipeFoo', function (next) {
+            order = [];
+
+            pipeFoo = Trooba
+            .use(function foo1(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo1');
+                    next();
+                });
+            })
+            .use(function foo2(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo2');
+                    next();
+                });
+            })
+            .use(function foo3(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo3');
+                    next();
+                });
+            })
+            .use(function fooTr(pipe) {
+                pipe.on('request', function () {
+                    order.push('foo-tr');
+                    pipe.respond();
+                });
+            })
+            .build();
+
+            pipeFoo.request({}, function () {
+                Assert.deepEqual([
+                    'foo1',
+                    'foo2',
+                    'foo3',
+                    'foo-tr'
+                ], order);
+                next();
+            });
+        });
+
+        it('should propagate request in bar', function (next) {
+            pipeBar = Trooba
+            .use(function bar1(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar1');
+                    next();
+                });
+            })
+            .use(function bar2(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar2');
+                    next();
+                });
+            })
+            .use(function bar3(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar3');
+                    next();
+                });
+            })
+            .use(function barTr(pipe) {
+                pipe.on('request', function () {
+                    order.push('bar-tr');
+                    pipe.respond();
+                });
+            })
+            .build();
+
+            order = [];
+            pipeBar.request({}, function () {
+                Assert.deepEqual([
+                    'bar1',
+                    'bar2',
+                    'bar3',
+                    'bar-tr'
+                ], order);
+
+                next();
+            });
+        });
+
+        it('should propagate request in linked pipe', function (next) {
+            pipeFoo = pipeFoo.create();
+            pipeBar = pipeBar.create();
+            pipeFoo.next.link(pipeBar);
+            order = [];
+
+            pipeFoo.request({}, function () {
+                Assert.deepEqual([
+                    'foo1',
+                    'bar1',
+                    'bar2',
+                    'bar3',
+                    'bar-tr'
+                ], order);
+                next();
+            });
+        });
+
+        it('should propagate response in foo', function (next) {
+            order = [];
+
+            pipeFoo = Trooba
+            .use(function foo1(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo1');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-foo1');
+                    next();
+                });
+            })
+            .use(function foo2(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo2');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-foo2');
+                    next();
+                });
+            })
+            .use(function foo3(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo3');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-foo3');
+                    next();
+                });
+            })
+            .use(function fooTr(pipe) {
+                pipe.on('request', function () {
+                    order.push('foo-tr');
+                    pipe.respond();
+                });
+            })
+            .build();
+
+            pipeFoo.request({}, function () {
+                Assert.deepEqual([
+                    'foo1',
+                    'foo2',
+                    'foo3',
+                    'foo-tr',
+                    'res-foo3',
+                    'res-foo2',
+                    'res-foo1'
+                ], order);
+                next();
+            });
+        });
+
+        it('should propagate request in linked pipe', function (next) {
+            pipeFoo = pipeFoo.create();
+            pipeBar = Trooba
+            .use(function bar1(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar1');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-bar1');
+                    next();
+                });
+            })
+            .use(function bar2(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar2');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-bar2');
+                    next();
+                });
+            })
+            .use(function bar3(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar3');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-bar3');
+                    next();
+                });
+            })
+            .use(function barTr(pipe) {
+                pipe.on('request', function () {
+                    order.push('bar-tr');
+                    pipe.respond();
+                });
+            })
+            .build();
+
+            pipeFoo.next.link(pipeBar);
+            order = [];
+
+            pipeFoo.request({}, function () {
+                Assert.deepEqual([
+                    'foo1',
+                    'bar1',
+                    'bar2',
+                    'bar3',
+                    'bar-tr',
+                    'res-bar3',
+                    'res-bar2',
+                    'res-bar1',
+                    'res-foo1'
+                ], order);
+                next();
+            });
+        });
+
+        it('should propagate response in extended pipe', function (next) {
+            pipeFoo = Trooba
+            .use(function foo1(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo1');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-foo1');
+                    next();
+                });
+            })
+            .use(function foo2(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo2');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-foo2');
+                    next();
+                });
+            })
+            .use(function foo3(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('foo3');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-foo3');
+                    next();
+                });
+            })
+            .use(function fooTr(pipe) {
+                pipe.on('request', function () {
+                    order.push('foo-tr');
+                    pipe.respond();
+                });
+            })
+            .build();
+
+            pipeBar = Trooba
+            .use(function bar1(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar1');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-bar1');
+                    next();
+                });
+            })
+            .use(function bar2(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar2');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-bar2');
+                    next();
+                });
+            })
+            .use(function bar3(pipe) {
+                pipe.on('request', function (r, next) {
+                    order.push('bar3');
+                    next();
+                });
+                pipe.on('response', function (r, next) {
+                    order.push('res-bar3');
+                    next();
+                });
+            })
+            .build();
+
+            pipeFoo.next.link(pipeBar);
+            order = [];
+
+            pipeFoo.request({}, function () {
+                Assert.deepEqual([
+                    'foo1',
+                    'bar1',
+                    'bar2',
+                    'bar3',
+                    'foo2',
+                    'foo3',
+                    'foo-tr',
+                    'res-foo3',
+                    'res-foo2',
+                    'res-bar3',
+                    'res-bar2',
+                    'res-bar1',
+                    'res-foo1'
+                ], order);
+                next();
+            });
+        });
+
+        describe('propagation through extended pipe', function () {
+            it('should prepare two pipes', function (next) {
+                pipeBar = Trooba
+                .use(function bar1(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('bar1');
+                        next();
+                    });
+                })
+                .use(function bar2(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('bar2');
+                        next();
+                    });
+                })
+                .use(function bar3(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('bar3');
+                        next();
+                    });
+                })
+                .build();
+
+                pipeFoo = Trooba
+                .use(function foo1(pipe) {
+                    pipe.link(pipeBar);
+                    pipe.on('request', function (r, next) {
+                        order.push('foo1');
+                        next();
+                    });
+                })
+                .use(function foo2(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('foo2');
+                        next();
+                    });
+                })
+                .use(function foo3(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('foo3');
+                        next();
+                    });
+                })
+                .use(function fooTr(pipe) {
+                    pipe.on('request', function () {
+                        order.push('foo-tr');
+                        pipe.respond();
+                    });
+                })
+                .build();
+                next();
+            });
+
+            it('should trace the modified pipe', function (next) {
+                order = [];
+
+                pipeFoo.trace(function (err, list) {
+                    Assert.deepEqual([
+                        'pipeHead-req',
+                        'foo1-req',
+                        'bar1-req',
+                        'bar2-req',
+                        'bar3-req',
+                        'foo2-req',
+                        'foo3-req',
+                        'fooTr-req',
+                        'fooTr-res',
+                        'foo3-res',
+                        'foo2-res',
+                        'bar3-res',
+                        'bar2-res',
+                        'bar1-res',
+                        'foo1-res',
+                        'pipeHead-res'
+                    ], list.map(function (p) {
+                        return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');
+                    }));
+                    next();
+                });
+            });
+
+            it('should propagate request in the modified pipe', function (next) {
+                order = [];
+
+                pipeFoo
+                .request({}, function () {
+                    Assert.deepEqual([
+                        'foo1',
+                        'bar1',
+                        'bar2',
+                        'bar3',
+                        'foo2',
+                        'foo3',
+                        'foo-tr'
+                    ], order);
+                    next();
+                });
+            });
+
+            it('should propagate response in modified pipe', function (next) {
+                pipeFoo = Trooba
+                .use(function foo1(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('foo1');
+                        next();
+                    });
+                    pipe.on('response', function (r, next) {
+                        order.push('res-foo1');
+                        next();
+                    });
+                })
+                .use(function foo2(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('foo2');
+                        next();
+                    });
+                    pipe.on('response', function (r, next) {
+                        order.push('res-foo2');
+                        next();
+                    });
+                })
+                .use(function foo3(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('foo3');
+                        next();
+                    });
+                    pipe.on('response', function (r, next) {
+                        order.push('res-foo3');
+                        next();
+                    });
+                })
+                .use(function fooTr(pipe) {
+                    pipe.on('request', function () {
+                        order.push('foo-tr');
+                        pipe.respond();
+                    });
+                })
+                .build();
+
+                pipeBar = Trooba
+                .use(function bar1(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('bar1');
+                        next();
+                    });
+                    pipe.on('response', function (r, next) {
+                        order.push('res-bar1');
+                        next();
+                    });
+                })
+                .use(function bar2(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('bar2');
+                        next();
+                    });
+                    pipe.on('response', function (r, next) {
+                        order.push('res-bar2');
+                        next();
+                    });
+                })
+                .use(function bar3(pipe) {
+                    pipe.on('request', function (r, next) {
+                        order.push('bar3');
+                        next();
+                    });
+                    pipe.on('response', function (r, next) {
+                        order.push('res-bar3');
+                        next();
+                    });
+                })
+                .build();
+
+                pipeFoo.next.link(pipeBar);
+                order = [];
+
+                pipeFoo.request({}, function () {
+                    Assert.deepEqual([
+                        'foo1',
+                        'bar1',
+                        'bar2',
+                        'bar3',
+                        'foo2',
+                        'foo3',
+                        'foo-tr',
+                        'res-foo3',
+                        'res-foo2',
+                        'res-bar3',
+                        'res-bar2',
+                        'res-bar1',
+                        'res-foo1'
+                    ], order);
+                    next();
+                });
+            });
+        });
+
+    });
+
+    describe('TTL', function () {
+        it('should expire message')
+    });
 });

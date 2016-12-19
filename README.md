@@ -9,27 +9,29 @@
 
 ## What is it?
 
-Trooba a fast isomorphic lightweight framework to build pipelines for request/response, stream/response, request/response and stream/stream use-cases spanning from a browser to a front-end app and further to a backend service.
+Trooba a fast isomorphic lightweight pipeline framework from eBay. Trooba can build pipelines for request/response, stream/response, request/response and stream/stream use-cases spanning from a browser to a front-end app and further to a backend services.
 
 It uses a stateless generic pipeline/bus used to route multiple requests in "parallel" without any conflicts. The contextual information is passed along with the message.
 
 ## What is it not?
 
-It is not another http based server framework like express, koa or hapi. It can be used to build a pipline for those as it is protocol free and allows to specify any transport one needs. For example see [examples](#examples)
+It is not another http based server framework like express, koa or hapi. It can be used to build a pipline for those as it is protocol independent and allows to specify any transport one needs. For example see [examples](#examples)
 
 ## What can it do for you?
 
 * Define a pipeline of handlers and execute it
     * The handlers are executed in order they were added.
 * Define a service client:
-    * The request object is passed from client through a set of handlers before getting to the transport handler
+    * The request object is passed from client through a set of handlers before getting to the transport handler.
     * The response object is passed in the reverse order of handlers from transport handler to the client.
 * Define a service:
     * The request object is passed from transport through a set of handlers before getting to the controller
     * The response object is passed in the reversed order from the controller defined by the user through a set of handlers to the transport of the service.
-* Set transport handler or a set of them in the fallback order (http, soap, grpc, mock or custom) for a pipeline
-* Customize API returned by pipe.build(customApiName) method mostly useful to provide a protocol specific API, for example, gRPC can expose API defined in proto file or soap API defined by wsdl.
-* Support for request/response, pub/sub or a mix of the modes
+* Set transport handler or a set of them in the fallback order (http, soap, grpc, mock or custom) for a pipeline.
+* Inject API returned by pipe.build(customApiName) method, mostly useful to provide a protocol specific API, for example, gRPC can expose API defined in proto file as client and service API or soap API defined by wsdl.
+* It supports request/response, pub/sub or a mix of these modes or you can use it as a one-way or bidirectional message bus.
+* You can link different pipelines together in definition or on-the-fly.
+* You can trace the route to troubleshoot any problems or learn some complex pipeline.
 
 ![pipeline flow](./docs/images/arch3.png)
 
@@ -40,7 +42,6 @@ It is not another http based server framework like express, koa or hapi. It can 
     - Submit github issues for any feature enhancements, bugs or documentation problems
 - **Support**: Join our [gitter chat](https://gitter.im/trooba) to ask questions to get support from the maintainers and other Trooba developers
     - Questions/comments can also be posted as [github issues](https://github.com/trooba/trooba/issues)
-
 
 ## Install
 
@@ -118,7 +119,7 @@ If you really need to support multiple listeners, you can add an event dispatche
 ### Trooba API
 
 * **use**(handler[, config]) adds a handler to the pipeline
-   * *handler* is a function handler(pipe){}
+   * *handler* is a function handler(pipe) {} or another pipe to join into this pipe.
    * *config* is a config object for the handler
 * **build*([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be available to all handlers.
 * **set**(name, value) used set system value to the context. The name is prefixed with '$' that prevents it from being propagated beyond the pipe boundaries.
@@ -128,18 +129,32 @@ If you really need to support multiple listeners, you can add an event dispatche
 
 The pipe object is passed to all handlers and transport during initialization whenever new context is created via trooba.build(context) or pipe.create(context) call.
 
-* **create**([context]) - creates a pipeline with new context or clones from the existing one if any present. The method is mandatory to initiate a new flow, otherwise the subsequent call will fail.
-* **request**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used, it will implicitly call *create* method
-* **streamRequest**(requestObject) - creates and sends an arbitrary request down the pipeline. If context was not used. It returns write stream with methods:
+* **create**([context]) creates a pipeline with new context or clones from the existing one if any present. The method is mandatory to initiate a new flow, otherwise the subsequent call will fail.
+* **link**(pipe) links given pipeline into the existing one. The link between pipes exists as long as the context where they were linked exists. Once pipe.create is used, it will lose the link. This is useful to link pipes on the fly, for example to bootstrap pipe from config file and inline it into existing pipeline where bootstrap handler is registered.
+```js
+Trooba.use(function bootstrapPipe(pipe) {
+    // load all the handlers from some json or config file
+    var handlers = []; // assume it is loaded as an array
+    // build the pipe or load from cache
+    var bootstrappedPipe = handlers.reduce((trooba, handler) => {
+        return trooba.use(handler);
+    }, Trooba).build();
+    // link it
+    pipe.link(bootstrappedPipe);
+});
+```
+* **request**(requestObject) creates and sends an arbitrary request down the pipeline. If context was not used, it will implicitly call *create* method
+* **streamRequest**(requestObject) creates and sends an arbitrary request down the pipeline. If context was not used. It returns write stream with methods:
     * **write(data)** write a chunk to the stream as "request:data" message
     * **end()** ends the stream and send "request:end" message
-* **throw**(Error) - sends the error down the response pipeline. If no error hooks defined in the pipeline, it will throw error. The method can be called only after the response flow is initiated.
+* **throw**(Error) sends the error down the response pipeline. If no error hooks defined in the pipeline, it will throw error. The method can be called only after the response flow is initiated.
 * **respond**(responseObject) - initiates a response flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated.
 * **streamResponse**(responseObject) - initiates a response stream flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated. It returns write stream with methods:
     * **write(data)** write a chunk to the stream as "response:data" message
     * **end()** ends the stream and send "response:end" message
 * **send**(message) sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
-* **trace**([Function tracer(message, pipe)]) enables tracing for the messages. It is kind of a visitor pattern. The function will be called for any message going through every pipe point and you are free to use it in any way imaginable. One obvious option is to trace the route using a special message type or trace request/response route with request and response.
+* **tracer**([Function trace(message, point)]) enables tracing for the messages. It is kind of a visitor pattern. The function will be called for any message going through every pipe point and you are free to use it in any way imaginable. One obvious option is to trace the route using a special message type or trace request/response route with request and response.
+* **trace**([Function callback(err, listOfPoints)]) is to trace the route that any message would travel, it uses message.type = 'trace' and returns a list of point it traveled in request/response flow.
 * **context** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed. The values in the context that have their names started with '$' will not be propagated beyond the pipe boundaries.
 * **set**(name, value) sets arbitrary system key-value pair to the context which will not be explicitly propagated beyond transport boundaries as internally the name will be prefixed as $name. It is used to provide custom API by handlers.
 * **get**(name) reads system value from the context.
@@ -166,6 +181,24 @@ Example:
     "ref": "[Error: some error message]",
     "sync": true
 }
+```
+
+**Note:** Since Trooba framework is based on message propagation through the pipeline, it uses time-to-live (TTL) parameter to limit the time the message can travel through the pipeline. By default it uses 1000ms for TTL, but you can configure it using config.ttl parameter.
+
+```js
+// set to 2 seconds
+// any message without ttl set will get 2000 ttl when they pass through this handler
+Trooba.use(handler, {
+    ttl: 2000
+})
+```
+When a message is expired, it will be dropped through console.log by default or you can intercept it by registering your own onDrop handler to the context
+```js
+Trooba.build({
+    onDrop: function (message) {
+        console.log('dropped message:', message);
+    }
+})
 ```
 
 ### Handler definition
@@ -418,12 +451,34 @@ Trooba
     })
 })
 .build()
-.trace(function (message, pipePoint) {
+.tracer(function (message, pipePoint) {
     route.push(pipePoint.handler.name);
 })
 .request('request', function () {
     console.log(route);
 });
+```
+
+Or you can just trace the route
+```js
+Trooba
+.use(function h1(pipe) {
+})
+.use(function h2(pipe) {
+})
+.use(function tr(pipe) {
+    pipe.on('request', function () {
+        pipe.respond('response')
+    })
+})
+.build()
+.trace(function onResult(err, listOfPoints) {
+    var list = listOfPoints.reduce((list, point) => {
+        list.push(point._id);
+        return list;
+    });
+    console.log('The route is ', list.join('->'))
+}, []);
 ```
 
 ### Enforcing delivery

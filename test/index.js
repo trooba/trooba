@@ -427,6 +427,29 @@ describe(__filename, function () {
             }
         });
 
+        it('should throw error if context is not set', function (done) {
+            var pipe;
+            try {
+                pipe = Trooba.use(function (handler) {}).build();
+                pipe.context = undefined;
+                pipe.trace();
+                done(new Error('Should have failed'));
+            }
+            catch (err) {
+                Assert.equal('Context is missing, please make sure context() is used first', err.message);
+            }
+
+            try {
+                pipe._points();
+                done(new Error('Should have failed'));
+            }
+            catch (err) {
+                Assert.equal('Context is missing, please make sure context() is used first', err.message);
+                done();
+            }
+
+        });
+
         it('should send error back if no target consumer found for the response', function (done) {
             var order = [];
             var domain = Domain.create();
@@ -962,7 +985,7 @@ describe(__filename, function () {
         });
     });
 
-    it.skip('should link two pipes and propagate error', function (done) {
+    it('should link two pipes and propagate error', function (done) {
         var order = [];
         var pipe1 = Trooba
         .use(function h1(pipe) {
@@ -2580,6 +2603,110 @@ describe(__filename, function () {
     });
 
     describe('TTL', function () {
-        it('should expire message')
+
+        describe('drop', function () {
+            var _log = console.log;
+            afterEach(function () {
+                console.log = _log;
+            });
+
+            it('should drop message int console', function (done) {
+                console.log = function intercept(msg, type, flow) {
+                    _log.apply(console, arguments);
+                    if (msg === 'The message has been dropped, ttl expired:') {
+                        done();
+                    }
+                };
+                Trooba
+                .use(function (pipe) {
+                    pipe.on('*', function loopBack(message) {
+                        setImmediate(function () {
+                            if (message.type === 'trace') {
+                                message.flow = 1;
+                                pipe.send(message);
+                            }
+                        });
+                    });
+                })
+                .use(function (pipe) {
+                    pipe.on('*', function loopBack(message) {
+                        setImmediate(function () {
+                            if (message.type === 'trace') {
+                                message.flow = 2;
+                                pipe.send(message);
+                            }
+                        });
+                    });
+                })
+                .build()
+                .trace();
+            });
+
+            it('should drop message into custom handler', function (done) {
+
+                Trooba
+                .use(function (pipe) {
+                    pipe.on('*', function loopBack(message) {
+                        setImmediate(function () {
+                            if (message.type === 'trace') {
+                                message.flow = 1;
+                                pipe.send(message);
+                            }
+                        });
+                    });
+                })
+                .use(function (pipe) {
+                    pipe.on('*', function loopBack(message) {
+                        setImmediate(function () {
+                            if (message.type === 'trace') {
+                                message.flow = 2;
+                                pipe.send(message);
+                            }
+                        });
+                    });
+                })
+                .build({
+                    onDrop: function onDrop(message) {
+                        Assert.equal('trace', message.type);
+                        done();
+                    }
+                })
+                .trace();
+            });
+        });
+
+    });
+
+    it('should access default next and prev without context', function () {
+        var pipe = Trooba.use(function (pipe) {}).build();
+        var nextPoint = pipe.next;
+        Assert.ok(pipe.next);
+        Assert.ok(nextPoint === pipe.next);
+        Assert.ok(!pipe.prev);
+
+        pipe.context = undefined;
+        Assert.ok(pipe.next);
+        Assert.ok(nextPoint !== pipe.next);
+
+        // build a pipe with prev
+        pipe = Trooba.use(function prev(pipe) {
+        }).use(function (pipe) {
+        }).build();
+
+        nextPoint = pipe.next;
+        var prevPoint = pipe.next.prev;
+        Assert.ok(pipe.next);
+        Assert.ok(nextPoint === pipe.next);
+        Assert.ok(pipe.next === pipe.next);
+        Assert.ok(pipe.next === pipe.next.next.prev);
+        Assert.ok(pipe.next.prev);
+        Assert.ok(prevPoint === pipe.next.prev);
+
+        pipe.context = undefined;
+        Assert.ok(pipe.next);
+        Assert.ok(nextPoint !== pipe.next);
+        Assert.ok(pipe.next === pipe.next.next.prev);
+        Assert.ok(pipe.next.prev);
+        Assert.ok(prevPoint !== pipe.next.prev);
     });
 });

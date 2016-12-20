@@ -112,7 +112,7 @@ function PipePoint(handler) {
 
 module.exports.PipePoint = PipePoint;
 module.exports.onDrop = function onDrop(message) {
-    console.log('the message has been onDropped, ttl expired:', message.type, message.flow);
+    console.log('The message has been dropped, ttl expired:', message.type, message.flow);
 };
 
 PipePoint.prototype = {
@@ -204,19 +204,18 @@ PipePoint.prototype = {
                 message.stage = Stages.PROCESS;
                 return self.send(message);
             }
-            pipe.send(message);
         });
         pipe.tail.on('$link$', function onEnd(message) {
             if (message.flow === Types.REQUEST) {
                 // send forward
                 return self.send(message);
             }
-            pipe.tail.send(message);
         });
     },
 
     trace: function trace$(callback) {
         var self = this;
+        callback = callback || console.log;
         this.once('trace', function (list) {
             self.removeListener('error');
             callback(null, list);
@@ -481,8 +480,8 @@ PipePoint.prototype = {
 
 Object.defineProperty(PipePoint.prototype, 'next', {
     get: function getNext() {
-        if (this.context && this._next$) {
-            return this._next$._points(this.context).ref;
+        if (this.context && this.context.$points && this._next$) {
+            return this.context.$points[this._next$._id].ref;
         }
         return this._next$;
     }
@@ -490,15 +489,15 @@ Object.defineProperty(PipePoint.prototype, 'next', {
 
 Object.defineProperty(PipePoint.prototype, 'prev', {
     get: function getPrev() {
-        if (this.context && this._prev$) {
-            this._prev$._points(this.context).ref;
+        if (this.context && this.context.$points && this._prev$) {
+            return this.context.$points[this._prev$._id].ref;
         }
         return this._prev$;
     }
 });
 
 Object.defineProperty(PipePoint.prototype, 'tail', {
-    get: function getPrev() {
+    get: function getTail() {
         if (this.context && this._tail$) {
             return this._tail$._points(this.context).ref;
         }

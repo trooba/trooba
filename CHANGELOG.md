@@ -2,6 +2,11 @@
 
 ## Next version
 
+## v1.0.2
+* link two pipes together on-the-fly, it is good to bootstrap the pipe from config file.
+* trace function to trace the routes with simple trace message
+* message time-to-live support, default is 1 second.
+
 ## v1.0.1
 * Added building pipe from the first to the last handler, before it was reverse order.
 * Added 'on' hooks to stream level

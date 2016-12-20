@@ -1,5 +1,7 @@
 'use strict';
 
+var TTL = 1000;
+
 /**
  * Assigns transport to the client pipeline
 */
@@ -17,9 +19,7 @@ Trooba.prototype = {
         if (handler instanceof PipePoint) {
             var pipeTo = handler;
             handler = function pipeConnect(pipe) {
-                pipeTo = pipeTo.create(pipe.context);
-                pipe.on('*', pipeTo.send.bind(pipeTo));
-                pipeTo.on('*', pipe.send.bind(pipe));
+                pipe.link(pipeTo);
             };
         }
 
@@ -27,6 +27,7 @@ Trooba.prototype = {
             handler: handler,
             config: config
         });
+
         this._pipe = undefined;
         return this;
     },
@@ -39,7 +40,7 @@ Trooba.prototype = {
         var pipe = this._pipe;
         if (!pipe) {
             var handlers = this._handlers.slice();
-            handlers.unshift(function startPoint() {});
+            handlers.unshift(function pipeHead() {});
             pipe = this._pipe = buildPipe(handlers);
         }
 
@@ -59,11 +60,12 @@ module.exports.use = function createWithHandler(handler, config) {
 
 function buildPipe(handlers) {
     var head;
-    handlers.reduce(function reduce(prev, handlerMeta) {
+    var tail = handlers.reduce(function reduce(prev, handlerMeta) {
         var point = createPipePoint(handlerMeta, prev);
         head = head || point;
         return point;
     }, undefined);
+    head._tail$ = tail;
     return head;
 }
 module.exports.buildPipe = buildPipe;
@@ -71,8 +73,8 @@ module.exports.buildPipe = buildPipe;
 function createPipePoint(handler, prev) {
     var point = new PipePoint(handler);
     if (prev) {
-        point.prev = prev;
-        prev.next = point;
+        point._prev$ = prev;
+        prev._next$ = point;
     }
     return point;
 }
@@ -84,6 +86,12 @@ var Types = {
     RESPONSE: 2
 };
 module.exports.Types = Types;
+
+var Stages = {
+    TRANSIT: 1,
+    PROCESS: 2
+};
+module.exports.Stages = Stages;
 
 /*
 * Channel point forms a linked list node
@@ -98,24 +106,40 @@ function PipePoint(handler) {
     // build a unique identifer for every new instance of point
     // we do not anticipate creates of so many within one pipe to create conflicts
     PipePoint.instanceCounter = PipePoint.instanceCounter ? PipePoint.instanceCounter : 0;
-    this._id = PipePoint.instanceCounter++;
+    this._uid = PipePoint.instanceCounter++;
+    this._id = (this.handler ? this.handler.name + '-' : '') + this._uid;
 }
 
 module.exports.PipePoint = PipePoint;
+module.exports.onDrop = function onDrop(message) {
+    console.log('The message has been dropped, ttl expired:', message.type, message.flow);
+};
 
 PipePoint.prototype = {
     send: function send$(message) {
+        message.ttl = message.ttl !== undefined ? message.ttl :
+            (Date.now() + (this.config && this.config.ttl || TTL));
+        if (message.ttl < Date.now()) {
+            // onDrop message and let user know
+            (this.context && this.context.onDrop || module.exports.onDrop)(message);
+            return;
+        }
+
         // pick the direction
-        var nextPoint = message.flow === Types.REQUEST ?
-            this.next : this.prev;
+        var nextPoint;
+        if (message.stage === Stages.PROCESS) {
+            nextPoint = this; // stay in this point, needs more processing
+        }
+        else {
+            nextPoint = message.flow === Types.REQUEST ? this._next$ : this._prev$;
+            message.stage = Stages.TRANSIT;
+        }
 
         if (nextPoint) {
-            if (!message.context && !this.context) {
+            message.context = message.context || this.context;
+            if (!message.context) {
                 throw new Error('Context is missing, make sure context() is used first');
             }
-            // attach context to the message to keep context flow
-            // check processing step to see where context goes
-            message.context = message.context || this.context;
             // forward message down the pipe
             nextPoint.process(message);
         }
@@ -127,74 +151,145 @@ PipePoint.prototype = {
             this.copy(message.context).throw(new Error('No target consumer found for the ' +
                 message.type + ' ' + JSON.stringify(message.ref)));
         }
+        else if (message.type === 'trace' && message.flow === Types.REQUEST) {
+            message.flow = Types.RESPONSE;
+            this.process(message);
+        }
 
         return this;
     },
 
     copy: function copy$(context) {
         var ret = new PipePoint();
-        ret.next = this.next;
-        ret.prev = this.prev;
+        ret._next$ = this._next$;
+        ret._prev$ = this._prev$;
+        ret._tail$ = this._tail$;
         ret._id = this._id;
         ret._messageHandlers = this._messageHandlers;
         ret.config = this.config;
         ret.handler = this.handler;
         ret.context = context;
+        ret._points();
         return ret;
     },
 
-    trace: function trace(tracer) {
+    tracer: function tracer$(tracer) {
         this.context.trace = true;
         this.context.tracer$ = tracer;
         return this;
     },
 
-    set: function set(name, value) {
+    set: function set$(name, value) {
         this.context['$'+name] = value;
         return this;
     },
 
-    get: function get(name) {
+    get: function get$(name) {
         return this.context['$'+name];
+    },
+
+    link: function link$(pipe) {
+        var self = this;
+        pipe = pipe.create(this.context);
+        this.on('$link$', function onStart(message) {
+            if (message.flow === Types.REQUEST) {
+                return pipe.send(message); // will be processed first
+            }
+            message.stage = Stages.PROCESS;
+            pipe.tail.send(message);
+        });
+        pipe.on('$link$', function onEnd(message) {
+            if (message.flow === Types.RESPONSE) {
+                // send back
+                message.stage = Stages.PROCESS;
+                return self.send(message);
+            }
+        });
+        pipe.tail.on('$link$', function onEnd(message) {
+            if (message.flow === Types.REQUEST) {
+                // send forward
+                return self.send(message);
+            }
+        });
+    },
+
+    trace: function trace$(callback) {
+        var self = this;
+        callback = callback || console.log;
+        this.once('trace', function (list) {
+            self.removeListener('error');
+            callback(null, list);
+        });
+        this.once('error', callback);
+
+        this.send({
+            type: 'trace',
+            flow: Types.REQUEST,
+            ref: [{
+                point: this,
+                flow: Types.REQUEST
+            }]
+        });
     },
 
     process: function process$(message) {
         var point = this;
         var messageHandlers;
-        // context propagation is sync and
-        // init all points in the pipeline
-        if (message.type === 'context') {
-            // create point bound to current message and assign the context
-            // this copy is 5 times faster then Object.create
-            point = point.copy();
-            point.context = message.context;
-            // allow hooks to happen
-            point.handler(point, point.config);
-        }
-        else {
-            if (message.context.trace && message.context.tracer$) {
-                message.context.tracer$(message, point);
+
+        // get the hooks
+        messageHandlers = this.handlers(message.context);
+
+        var processMessage = messageHandlers.$link$;
+        if (processMessage) {
+            // for request flow first process through regular hooks if any
+            if (message.flow === Types.REQUEST) {
+                if (message.stage === Stages.PROCESS) {
+                    // after processing, go to the next point
+                    message.stage = Stages.TRANSIT;
+                    return processMessage(message);
+                }
+                // make sure the next cycle happens in this point
+                message.stage = Stages.PROCESS;
             }
-            // handle the hooks
-            messageHandlers = this.handlers(message.context);
-            var anyType;
-            var processMessage = messageHandlers[message.type];
-            if (!processMessage) {
+            if (message.flow === Types.RESPONSE) {
+                // in response flow it should first go throuh the linked pipe
+                if (message.stage === Stages.TRANSIT) {
+                    return processMessage(message);
+                }
+                // make sure it goes to the next point
+                message.stage = Stages.TRANSIT;
+            }
+        }
+
+        if (message.context.trace && message.context.tracer$) {
+            message.context.tracer$(message, point);
+        }
+
+        if (message.type === 'trace') {
+            message.ref.push({
+                point: this,
+                flow: message.flow,
+                stage: message.stage
+            });
+        }
+
+        var anyType;
+        processMessage = messageHandlers[message.type];
+        if (!processMessage) {
                 processMessage = messageHandlers['*'];
                 anyType = true;
-            }
-            if (processMessage) {
-                // if sync delivery, than no callback needed before propagation further
-                processMessage(anyType ? message : message.ref,
+        }
+        if (processMessage) {
+            // if sync delivery, than no callback needed before propagation further
+            processMessage(anyType ? message : message.ref,
                     message.sync ? undefined : onComplete);
-                if (!message.sync) {
-                    // on complete would continued the flow
-                    return;
-                }
-            }
-            else if (processEndEvent()) {
+            if (!message.sync) {
+                // on complete would continued the flow
                 return;
             }
+        }
+        else if (processEndEvent()) {
+            return;
         }
 
         point.send(message);
@@ -207,6 +302,7 @@ PipePoint.prototype = {
             if (processEndEvent()) {
                 return;
             }
+
             point.send(message);
         }
 
@@ -244,15 +340,21 @@ PipePoint.prototype = {
                 }
             });
         }
-        // bind context to the point and return it
-        var contextualPoint = this.copy();
-        contextualPoint.context = context;
-        contextualPoint.send({
-            type: 'context',
-            flow: Types.REQUEST,
-            ref: context
-        });
-        return contextualPoint;
+
+        // bind context to the points
+        var head = this.copy(context);
+
+        var current = head;
+        while(current) {
+            current.handler(current, current.config);
+            var next = current._next$;
+            if (next) {
+                next = next.copy(context);
+            }
+            current = next;
+        }
+
+        return head;
     },
 
     throw: function throw$(err) {
@@ -299,7 +401,7 @@ PipePoint.prototype = {
 
         if (callback) {
             point
-            .on('error', callback)
+            .on('error', function (err) { callback(err); })
             .on('response', function (res) { callback(null, res); });
 
             sendRequest();
@@ -338,7 +440,7 @@ PipePoint.prototype = {
     on: function onEvent$(type, handler) {
         var handlers = this.handlers();
         if (handlers[type]) {
-            throw new Error('The hook has already been registered, you can use only one hook for specific event type: ' + type);
+            throw new Error('The hook has already been registered, you can use only one hook for specific event type: ' + type + ', point.id:' + this._id);
         }
         handlers[type] = handler;
         return this;
@@ -353,17 +455,55 @@ PipePoint.prototype = {
         return this;
     },
 
-    handlers: function handlers(ctx) {
+    removeListener: function removeListener$(type) {
+        delete this.handlers()[type];
+    },
+
+    _points: function _points$(ctx) {
         ctx = ctx || this.context;
         if (!ctx) {
             throw new Error('Context is missing, please make sure context() is used first');
         }
         ctx = ctx.$points = ctx.$points || {};
-        ctx = ctx[this._id] = ctx[this._id] || {};
+        ctx = ctx[this._id] = ctx[this._id] || {
+            ref: this
+        };
+        return ctx;
+    },
+
+    handlers: function handlers$(ctx) {
+        ctx = this._points(ctx);
         ctx._messageHandlers = ctx._messageHandlers || {};
         return ctx._messageHandlers;
     }
 };
+
+Object.defineProperty(PipePoint.prototype, 'next', {
+    get: function getNext() {
+        if (this.context && this.context.$points && this._next$) {
+            return this.context.$points[this._next$._id].ref;
+        }
+        return this._next$;
+    }
+});
+
+Object.defineProperty(PipePoint.prototype, 'prev', {
+    get: function getPrev() {
+        if (this.context && this.context.$points && this._prev$) {
+            return this.context.$points[this._prev$._id].ref;
+        }
+        return this._prev$;
+    }
+});
+
+Object.defineProperty(PipePoint.prototype, 'tail', {
+    get: function getTail() {
+        if (this.context && this._tail$) {
+            return this._tail$._points(this.context).ref;
+        }
+        return this._tail$;
+    }
+});
 
 function createWriteStream(ctx) {
     var type = ctx.flow === Types.REQUEST ? 'request:data' : 'response:data';

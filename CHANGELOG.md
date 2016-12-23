@@ -1,6 +1,7 @@
 # ChangeLog
 
 ## Next version
+* Allow to link on-the-fly in message/request flow, not just at context init time
 
 ## v1.0.2
 * link two pipes together on-the-fly, it is good to bootstrap the pipe from config file.

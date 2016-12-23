@@ -13,6 +13,8 @@ Trooba a fast isomorphic lightweight pipeline framework from eBay. Trooba can bu
 
 It uses a stateless generic pipeline/bus used to route multiple requests in "parallel" without any conflicts. The contextual information is passed along with the message.
 
+Trooba does not dictate specific data structures that should be used for request/response/messages/stream objects. It assumes basic requirements and leaves everything else to the implementor of the transport.
+
 ## What is it not?
 
 It is not another http based server framework like express, koa or hapi. It can be used to build a pipline for those as it is protocol independent and allows to specify any transport one needs. For example see [examples](#examples)

@@ -330,7 +330,10 @@ describe(__filename, function () {
                 foo: 'bar',
                 tra: 'asd',
                 fa1: 'zx1',
-                fa2: 'zx2'
+                fa2: 'zx2',
+                validate: {
+                    request: false
+                }
             }, response);
             done();
         });
@@ -440,7 +443,7 @@ describe(__filename, function () {
             }
 
             try {
-                pipe._points();
+                pipe._pointCtx();
                 done(new Error('Should have failed'));
             }
             catch (err) {
@@ -450,7 +453,7 @@ describe(__filename, function () {
 
         });
 
-        it('should send error back if no target consumer found for the response', function (done) {
+        it('should send error back if no target consumer found for the request by default', function (done) {
             var order = [];
             var domain = Domain.create();
             domain.run(function () {
@@ -470,6 +473,37 @@ describe(__filename, function () {
                 })
                 .build()
                 .set('strict', 'response')
+                .request({
+                    foo: 'bar'
+                });
+            });
+
+            domain.once('error', function (err) {
+                Assert.equal('No target consumer found for the response "ok"', err.message);
+                Assert.deepEqual(['zx1', 'zx2'], order);
+                done();
+            });
+        });
+
+        it.skip('should not send error back if no target consumer found when the request is disabled', function (done) {
+            var order = [];
+            var domain = Domain.create();
+            domain.run(function () {
+                Trooba
+                .use(function handler(pipe) {
+                    order.push('zx1');
+                })
+                .use(function handler(pipe) {
+                    order.push('zx2');
+                })
+                .use(function handler(pipe) {
+
+                })
+                .build({
+                    validate: {
+                        // request: false
+                    }
+                })
                 .request({
                     foo: 'bar'
                 });
@@ -1581,6 +1615,8 @@ describe(__filename, function () {
         var pipe = Trooba.use(function (pipe) {
             var reqData = [];
             Assert.ok(!pipe.context.$requestStream);
+            pipe.on('request', function () {
+            });
             pipe.on('request:data', function (data, next) {
                 Assert.ok(pipe.context.$requestStream);
                 reqData.push(data);
@@ -1981,7 +2017,7 @@ describe(__filename, function () {
         it('should fail to re-insert pipe where it is already added', function (next) {
             Assert.throws(function () {
                 pipeFoo.next.link(pipeBar);
-            }, /The hook has already been registered, you can use only one hook for specific event type: */);
+            }, /The pipe already has a link/);
             next();
         });
 
@@ -2594,6 +2630,316 @@ describe(__filename, function () {
                         'res-bar2',
                         'res-bar1',
                         'res-foo1'
+                    ], order);
+                    next();
+                });
+            });
+
+            describe('should join two pipes at request stage and route throuh modified pipe',
+            function () {
+                it('init', function () {
+                    pipeFoo = Trooba
+                    .use(function foo1(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('foo1');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-foo1');
+                            next();
+                        });
+                    })
+                    .use(function foo2(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('foo2');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-foo2');
+                            next();
+                        });
+                    })
+                    .use(function foo3(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('foo3');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-foo3');
+                            next();
+                        });
+                    })
+                    .use(function fooTr(pipe) {
+                        pipe.on('request', function () {
+                            order.push('foo-tr');
+                            pipe.respond();
+                        });
+                    })
+                    .build();
+
+                    pipeBar = Trooba
+                    .use(function bar1(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('bar1');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-bar1');
+                            next();
+                        });
+                    })
+                    .use(function bar2(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('bar2');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-bar2');
+                            next();
+                        });
+                    })
+                    .use(function bar3(pipe) {
+                        pipe.on('request', function (r, next, context) {
+                            pipe.link(pipeFoo);
+                            next();
+                        });
+                    })
+                    .build();
+
+                });
+
+                it('link, first time', function (next) {
+
+                    order = [];
+
+                    pipeBar.request({}, function () {
+                        Assert.deepEqual([
+                            'bar1',
+                            'bar2',
+                            'foo1',
+                            'foo2',
+                            'foo3',
+                            'foo-tr',
+                            'res-foo3',
+                            'res-foo2',
+                            'res-foo1',
+                            'res-bar2',
+                            'res-bar1'
+                        ], order);
+                        next();
+                    });
+                });
+
+                it('link, second time', function (next) {
+
+                    order = [];
+
+                    pipeBar.create().request({}, function () {
+                        Assert.deepEqual([
+                            'bar1',
+                            'bar2',
+                            'foo1',
+                            'foo2',
+                            'foo3',
+                            'foo-tr',
+                            'res-foo3',
+                            'res-foo2',
+                            'res-foo1',
+                            'res-bar2',
+                            'res-bar1'
+                        ], order);
+                        next();
+                    });
+                });
+
+            });
+
+            describe('should link in parallel without conflict', function () {
+                var mainPipe;
+                var toPipe;
+
+                before(function () {
+                    toPipe = Trooba
+                    .use(function foo1(pipe) {
+                        pipe.on('request', function (r, next) {
+                            r.order.push('foo1' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                        pipe.on('response', function (r, next) {
+                            r.order.push('res-foo1' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .use(function foo2(pipe) {
+                        pipe.on('request', function (r, next) {
+                            r.order.push('foo2' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                        pipe.on('response', function (r, next) {
+                            r.order.push('res-foo2' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .use(function fooTr(pipe) {
+                        pipe.on('request', function (r) {
+                            setTimeout(function () {
+                                r.order.push('foo-tr' + '-' + r.index);
+                                pipe.respond(r);
+                            }, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .build();
+
+                    mainPipe = Trooba
+                    .use(function bar1(pipe) {
+                        pipe.on('request', function (r, next) {
+                            r.order.push('bar1' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                        pipe.on('response', function (r, next) {
+                            r.order.push('res-bar1' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .use(function bar2(pipe) {
+                        pipe.on('request', function (r, next) {
+                            r.order.push('bar2' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                        pipe.on('response', function (r, next) {
+                            r.order.push('res-bar2' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .use(function bar3(pipe) {
+                        pipe.on('request', function (r, next, context) {
+                            pipe.link(toPipe);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .build();
+                });
+
+                it('test', function (next) {
+                    var count = 0;
+                    var RUNS = 1000;
+                    function oneRequest(index, next) {
+                        mainPipe.create().request({
+                            order: [],
+                            index: index
+                        }, function (err, r) {
+                            count++;
+                            Assert.deepEqual([
+                                'bar1-' + index,
+                                'bar2-' + index,
+                                'foo1-' + index,
+                                'foo2-' + index,
+                                'foo-tr-' + index,
+                                'res-foo2-' + index,
+                                'res-foo1-' + index,
+                                'res-bar2-' + index,
+                                'res-bar1-' + index
+                            ], r.order);
+                            next();
+                        });
+                    }
+
+                    Async.times(RUNS, oneRequest, function () {
+                        Assert.equal(RUNS, count);
+                        next();
+                    });
+                });
+
+            });
+
+            it('should join two pipes at sync message and route to new pipe', function (next) {
+                var mainPipe = Trooba
+                .use(function foo1(pipe) {
+                    pipe.on('custom', function (r, next) {
+                        order.push('foo1');
+                        pipe.link(toPipe);
+                        next();
+                    });
+                })
+                .use(function foo2(pipe) {
+                    pipe.on('custom', function (r) {
+                        order.push('foo2');
+                        pipe.respond();
+                    });
+                })
+                .build();
+
+                var toPipe = Trooba
+                .use(function bar1(pipe) {
+                    pipe.on('custom', function (r, next) {
+                        order.push('bar1');
+                        next();
+                    });
+                })
+                .use(function bar2(pipe) {
+                    pipe.on('custom', function (r, next) {
+                        order.push('bar2');
+                        next();
+                    });
+                })
+                .build();
+
+
+                order = [];
+
+                mainPipe
+                .on('response', function () {
+                    Assert.deepEqual([
+                        'foo1',
+                        'bar1',
+                        'bar2',
+                        'foo2'
+                    ], order);
+                    next();
+                })
+                .send({
+                    type: 'custom',
+                    flow: 1
+                });
+            });
+
+            it('should join two pipes at the time of tracing', function (next) {
+                var mainPipe = Trooba
+                .use(function foo1(pipe) {
+                    pipe.once('trace', function (t, next) {
+                        pipe.link(toPipe);
+                        next();
+                    });
+                })
+                .use(function foo2(pipe) {
+
+                })
+                .build();
+
+                var toPipe = Trooba
+                .use(function bar1(pipe) {
+                })
+                .use(function bar2(pipe) {
+                })
+                .build();
+
+
+                mainPipe
+                .trace(function (err, list) {
+                    var order = list.map(function (item) {
+                        return item.point.handler.name;
+                    });
+                    Assert.deepEqual([
+                        'pipeHead',
+                        'foo1',
+                        'bar1',
+                        'bar2',
+                        'foo2',
+                        'foo2',
+                        'bar2',
+                        'bar1',
+                        'foo1',
+                        'pipeHead'
                     ], order);
                     next();
                 });

@@ -4,6 +4,7 @@
 * Allow to link on-the-fly in message/request flow, not just at context init time.
 * Removed context init from trooba.build() call. Now it should only happen at pipe.create(). Build will only construct the pipeline and cache it with generic context.
 * Removed selecting custom API from trooba.build() call. Now one should only use pipe.create(ctx, 'custom-api-name');
+* Increased default message TTL to 15sec and added option to configure ttl via config.
 
 ## v1.0.2
 * link two pipes together on-the-fly, it is good to bootstrap the pipe from config file.

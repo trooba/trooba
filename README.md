@@ -190,15 +190,13 @@ Example:
 **Note:** Since Trooba framework is based on message propagation through the pipeline, it uses time-to-live (TTL) parameter to limit the time the message can travel through the pipeline. By default it uses 1000ms for TTL, but you can configure it using config.ttl parameter.
 
 ```js
-// set to 2 seconds
-// any message without ttl set will get 2000 ttl when they pass through this handler
-Trooba.use(handler, {
-    ttl: 2000
-})
+// set TTL to 2 seconds
+Trooba.use(handler)
 ```
 When a message is expired, it will be dropped through console.log by default or you can intercept it by registering your own onDrop handler to the context
 ```js
 Trooba.build({
+    ttl: 2000,
     onDrop: function (message) {
         console.log('dropped message:', message);
     }

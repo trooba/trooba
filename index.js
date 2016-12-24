@@ -1,6 +1,6 @@
 'use strict';
 
-var TTL = 1000;
+var TTL = 15000;
 
 /**
  * Assigns transport to the client pipeline
@@ -129,7 +129,7 @@ PipePoint.prototype = {
         }
 
         message.ttl = message.ttl !== undefined ? message.ttl :
-            (Date.now() + (this.config && this.config.ttl || TTL));
+            (Date.now() + (this.context && this.context.ttl || TTL));
         if (message.ttl < Date.now()) {
             // onDrop message and let user know
             (this.context && this.context.onDrop || module.exports.onDrop)(message);

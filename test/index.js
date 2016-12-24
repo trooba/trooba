@@ -3059,7 +3059,7 @@ describe(__filename, function () {
                 console.log = _log;
             });
 
-            it('should drop message int console', function (done) {
+            it('should drop message into console', function (done) {
                 console.log = function intercept(msg, type, flow) {
                     _log.apply(console, arguments);
                     if (msg === 'The message has been dropped, ttl expired:') {
@@ -3087,7 +3087,9 @@ describe(__filename, function () {
                         });
                     });
                 })
-                .build()
+                .build({
+                    ttl: 2
+                })
                 .create()
                 .trace();
             });
@@ -3121,7 +3123,9 @@ describe(__filename, function () {
                         done();
                     }
                 })
-                .create()
+                .create({
+                    ttl: 2
+                })
                 .trace();
             });
         });

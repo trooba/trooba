@@ -32,13 +32,9 @@ Trooba.prototype = {
         return this;
     },
 
-    build: function build$(context, interfaceName) {
-        if (typeof arguments[0] === 'string') {
-            interfaceName = arguments[0];
-            context = undefined;
-        }
+    build: function build$(context) {
         var pipe = this._pipe;
-        if (!pipe) {
+        if (!pipe || context) {
             var handlers = this._handlers.slice();
             handlers.unshift(function pipeHead() {});
             pipe = this._pipe = buildPipe(handlers);
@@ -52,16 +48,12 @@ Trooba.prototype = {
             return memo;
         }, {
             validate: {
-                request: false // always validate request by default
+                request: false // always validate request by default, not now TODO: set to true
             }
         });
 
-        pipe = pipe.create(context);
-        var factory = interfaceName && pipe.get(interfaceName);
-        if (interfaceName && !factory) {
-            throw new Error('Cannot find factory for ' + interfaceName);
-        }
-        return interfaceName ? factory(pipe) : pipe;
+        pipe.context = context;
+        return pipe;
     }
 };
 
@@ -131,6 +123,11 @@ module.exports.onDrop = function onDrop(message) {
 
 PipePoint.prototype = {
     send: function send$(message) {
+        message.context = message.context || this.context;
+        if (!message.context.$inited) {
+            throw new Error('The context has not been initialized, make sure you use pipe.create()');
+        }
+
         message.ttl = message.ttl !== undefined ? message.ttl :
             (Date.now() + (this.config && this.config.ttl || TTL));
         if (message.ttl < Date.now()) {
@@ -150,7 +147,6 @@ PipePoint.prototype = {
         }
 
         if (nextPoint) {
-            message.context = message.context || this.context;
             if (!message.context) {
                 throw new Error('Context is missing, make sure context() is used first');
             }
@@ -254,7 +250,6 @@ PipePoint.prototype = {
     },
 
     process: function process$(message) {
-console.log(this._id, message.type)
         var point = this;
         var messageHandlers;
 
@@ -388,6 +383,7 @@ console.log(this._id, message.type)
             current = current._next$ ?
                 current._next$.copy(context) : undefined;
         }
+        context.$inited = true;
 
         if (!interfaceName) {
             return head;

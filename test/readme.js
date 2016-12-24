@@ -74,7 +74,7 @@ describe(__filename, function () {
             protocol: 'http:',
             hostname: 'www.google.com',
             path: '/search'
-        }).build('api');
+        }).build().create('api');
 
         client.search('nike', function (err, response) {
             session.done();
@@ -124,6 +124,7 @@ describe(__filename, function () {
             path: '/search'
         })
         .build()
+        .create()
         .request({
             q: 'nike'
         }, function (err, response) {
@@ -167,13 +168,13 @@ describe(__filename, function () {
 
         }
 
-        var client = Trooba.use(transport, {
+        var pipe = Trooba.use(transport, {
             protocol: 'http:',
             hostname: 'www.google.com',
             path: '/search'
         }).build();
 
-        client.request({
+        pipe.create().request({
             q: 'nike'
         })
         .on('error', done)
@@ -224,7 +225,7 @@ describe(__filename, function () {
             .use(createMockTransport())
             .build();
 
-        client.request({}, function (err, response) {
+        client.create().request({}, function (err, response) {
             Assert.ok(!err, err && err.stack);
             Assert.equal('some text', response);
             Assert.equal(1, retryCounter);

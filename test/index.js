@@ -25,6 +25,41 @@ describe(__filename, function () {
         Assert.ok(client.build);
     });
 
+    it('should not invoke init during trooba.build', function (done) {
+        Trooba.use(function tr(pipe) {
+            done(new Error('should not happen'));
+        })
+        .build();
+
+        setImmediate(done);
+    });
+
+    it('should throw error when create was not used before request call', function (done) {
+        var pipe = Trooba.use(function tr(pipe) {
+            pipe.on('request', function (request) {
+                done(new Error('Should never happen'));
+            });
+        })
+        .build();
+
+
+        var domain = Domain.create();
+        domain.run(function () {
+            pipe
+            .request({
+                foo: 'bar'
+            });
+
+        });
+
+        domain.once('error', function (err) {
+            Assert.equal('The context has not been initialized, make sure you use pipe.create()',
+                err.message);
+            done();
+        });
+
+    });
+
     it('should call transport with context', function (done) {
         var pipe = Trooba.use(function tr(pipe) {
             Assert.ok(pipe);
@@ -45,7 +80,8 @@ describe(__filename, function () {
         })
         .build({
             fer: 'thy'
-        });
+        })
+        .create();
 
         pipe
         .on('error', done)
@@ -76,6 +112,7 @@ describe(__filename, function () {
             asd: 'zxc'
         })
         .build()
+        .create()
         .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
@@ -118,7 +155,8 @@ describe(__filename, function () {
                     request));
             });
         })
-        .build('client');
+        .build()
+        .create('client');
 
         client.hello('John', function validateResponse(err, response) {
             Assert.ok(!err, err && err.stack);
@@ -133,7 +171,10 @@ describe(__filename, function () {
             pipe.on('request', function () {
                 pipe.throw(new Error('Test Error'));
             });
-        }).build().request({
+        })
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(err);
@@ -158,6 +199,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
@@ -184,7 +226,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -203,7 +247,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -229,7 +275,9 @@ describe(__filename, function () {
                 done(new Error('Should not happen'));
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -256,7 +304,9 @@ describe(__filename, function () {
                 done(new Error('Should not happen'));
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -288,7 +338,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -322,7 +374,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -414,7 +468,9 @@ describe(__filename, function () {
                 done(new Error('should not happen'));
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.deepEqual('Test', err.message);
@@ -433,7 +489,7 @@ describe(__filename, function () {
         it('should throw error if context is not set', function (done) {
             var pipe;
             try {
-                pipe = Trooba.use(function (handler) {}).build();
+                pipe = Trooba.use(function (handler) {}).build().create();
                 pipe.context = undefined;
                 pipe.trace();
                 done(new Error('Should have failed'));
@@ -472,6 +528,7 @@ describe(__filename, function () {
                     });
                 })
                 .build()
+                .create()
                 .set('strict', 'response')
                 .request({
                     foo: 'bar'
@@ -504,6 +561,7 @@ describe(__filename, function () {
                         // request: false
                     }
                 })
+                .create()
                 .request({
                     foo: 'bar'
                 });
@@ -535,6 +593,7 @@ describe(__filename, function () {
                     });
                 })
                 .build()
+                .create()
                 .set('strict', ['response'])
                 .request({
                     foo: 'bar'
@@ -570,7 +629,9 @@ describe(__filename, function () {
                         done(new Error('should not happen'));
                     });
                 })
-                .build().request({
+                .build()
+                .create()
+                .request({
                     foo: 'bar'
                 });
             });
@@ -661,7 +722,8 @@ describe(__filename, function () {
                 .use(handlerCtxModifier)
                 .use(handlerRequestCounter)
                 .use(transport)
-                .build();
+                .build()
+                .create();
 
             function makeRequest(index, next) {
                 pipe = pipe.create();
@@ -694,7 +756,8 @@ describe(__filename, function () {
                     }, 10);
                 });
             })
-            .build();
+            .build()
+            .create();
 
             var domain = Domain.create();
             domain.run(function () {
@@ -729,7 +792,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.deepEqual({
@@ -764,7 +829,9 @@ describe(__filename, function () {
         })
         .build({
             order: []
-        }).request({
+        })
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.equal(['zx1', 'zx2', 'zx3', 'tr'].toString(),
@@ -786,6 +853,7 @@ describe(__filename, function () {
             order.push('zx3');
         })
         .build()
+        .create()
         .set('strict', 'request')
         .request({
             foo: 'bar'
@@ -878,6 +946,7 @@ describe(__filename, function () {
         .build({
             retry: 1
         })
+        .create()
         .request({});
 
         pipeCtx.on('response:end', function validateResponse(err, response) {
@@ -983,7 +1052,7 @@ describe(__filename, function () {
             p: 2
         });
 
-        pipe.tracer(function (message, pipePoint) {
+        pipe.create().tracer(function (message, pipePoint) {
             route.push(pipePoint.handler.name + (message.flow === 1 ? '-req' : '-res'));
         }).request({
             foo: 'bar'
@@ -1078,6 +1147,7 @@ describe(__filename, function () {
         .build({
             p: 2
         })
+        .create()
         .request({
             foo: 'bar'
         })
@@ -1105,6 +1175,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('response:data', function (data, next) {
             chunks.push(data);
             next();
@@ -1125,6 +1196,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('error', done)
         .on('response:end', function validateResponse() {
             done();
@@ -1284,7 +1356,7 @@ describe(__filename, function () {
                     };
                 });
             })
-            .build('client');
+            .build().create('client');
 
         function makeRequest(index, next) {
             client.doRequest(index, function (err, response) {
@@ -1316,6 +1388,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('response:end', function () {
             setTimeout(done, 10);
         })
@@ -1330,6 +1403,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('response', function () {
             setTimeout(done, 10);
         })
@@ -1351,7 +1425,8 @@ describe(__filename, function () {
         })
         .build({
             foo: 'bar'
-        });
+        })
+        .create();
 
         client.request({}, function (err, response) {
             Assert.equal('bar', response);
@@ -1371,7 +1446,8 @@ describe(__filename, function () {
                 pipe.respond({});
             });
         })
-        .build();
+        .build()
+        .create();
 
         client.request({}, function () {
             Assert.throws(function () {
@@ -1388,7 +1464,8 @@ describe(__filename, function () {
                 pipe.throw(new Error('Bad'));
             });
         })
-        .build();
+        .build()
+        .create();
 
         pipe.request({})
         .once('error', function (err) {
@@ -1412,6 +1489,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .request({})
         .once('error', function (err) {
             Assert.equal('Another bad', err.message);
@@ -1433,6 +1511,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .request('original')
         .once('response', function (response) {
             Assert.equal('replaced', response);
@@ -1455,6 +1534,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .request('original')
         .once('response', function (response) {
             Assert.equal('replaced', response);
@@ -1471,6 +1551,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .once('response', function (response) {
             Object.keys(pipe.context.$points).forEach(function forEach(index) {
                 Assert.deepEqual({}, pipe.context.$points[index]._messageHandlers);
@@ -1501,6 +1582,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .once('response', function (response) {
             Assert.equal('foobar', response);
             Assert.equal(['replace', 'tr'].toString(), order.toString());
@@ -1551,6 +1633,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .once('response', function (response) {
             Assert.deepEqual(['replace', 'shouldNotAffect', 'tr'], order);
             Assert.equal('barfoo', response);
@@ -1596,6 +1679,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .once('response', function (response) {
             Assert.deepEqual(['replace', 'shouldNotAffect', 'tr'], order);
 
@@ -1629,7 +1713,7 @@ describe(__filename, function () {
             });
         })
         .build()
-        ;
+        .create();
 
         pipe.streamRequest('request')
             .write('foo')
@@ -1652,6 +1736,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('response', function (response) {
             Assert.equal('response', response);
         });
@@ -1678,7 +1763,8 @@ describe(__filename, function () {
                     .end();
             });
         })
-        .build();
+        .build()
+        .create();
 
         var reqData = [];
         pipe.request('request')
@@ -1710,7 +1796,9 @@ describe(__filename, function () {
                     .end();
             });
         })
-        .build().request('request');
+        .build()
+        .create()
+        .request('request');
 
         pipe.once('response:end', function (data) {
             Assert.deepEqual(['request', 'response', 'foo', 'bar', undefined], messages);
@@ -1731,6 +1819,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('response', function (response) {
             Assert.equal('response', response);
         });
@@ -1765,7 +1854,9 @@ describe(__filename, function () {
         })
         .build({
             retry: 2
-        }).request({
+        })
+        .create()
+        .request({
             order: []
         }, function validateResponse(err, response) {
             Assert.ok(err);
@@ -1786,6 +1877,7 @@ describe(__filename, function () {
         .build({
             retry: 2
         })
+        .create()
         .request({
             order: []
         }, function validateResponse(err, response) {
@@ -1839,7 +1931,7 @@ describe(__filename, function () {
             return tr;
         }
 
-        var client = Trooba.use(factory()).build('api');
+        var client = Trooba.use(factory()).build().create('api');
         Assert.ok(client.hello);
         Assert.ok(client.bye);
         done();
@@ -1884,7 +1976,7 @@ describe(__filename, function () {
             return tr;
         }
 
-        var client = Trooba.use(factory()).build('api');
+        var client = Trooba.use(factory()).build().create('api');
         client.hello('John', function (err, response) {
             Assert.equal('hello John', response);
         });
@@ -1927,7 +2019,7 @@ describe(__filename, function () {
             return tra;
         }
 
-        var client = Trooba.use(factory()).build('api');
+        var client = Trooba.use(factory()).build().create('api');
 
         client.request({
             foo: 'bar'
@@ -1950,7 +2042,8 @@ describe(__filename, function () {
             .use(function foo1(pipe) {
                 order.push('foo1');
             })
-            .build();
+            .build()
+            .create();
 
             Assert.deepEqual([
                 'foo1'
@@ -1976,6 +2069,9 @@ describe(__filename, function () {
             })
             .build();
 
+            Assert.deepEqual([], order);
+            pipeBar = pipeBar.create();
+
             Assert.deepEqual([
                 'bar1',
             ], order);
@@ -2000,7 +2096,7 @@ describe(__filename, function () {
         });
 
         it('should trace pipeBar', function (next) {
-            pipeBar.trace(function (err, list) {
+            pipeBar.create().trace(function (err, list) {
                 Assert.deepEqual([
                     'pipeHead-req',
                     'bar1-req',
@@ -2088,7 +2184,8 @@ describe(__filename, function () {
             .use(function foo3(pipe) {
                 order.push('foo3');
             })
-            .build();
+            .build()
+            .create();
 
             // link to other pipe
             var pipeQaz = Trooba
@@ -2158,7 +2255,7 @@ describe(__filename, function () {
             })
             .build();
 
-            pipeFoo.request({}, function () {
+            pipeFoo.create().request({}, function () {
                 Assert.deepEqual([
                     'foo1',
                     'foo2',
@@ -2198,7 +2295,7 @@ describe(__filename, function () {
             .build();
 
             order = [];
-            pipeBar.request({}, function () {
+            pipeBar.create().request({}, function () {
                 Assert.deepEqual([
                     'bar1',
                     'bar2',
@@ -2270,7 +2367,7 @@ describe(__filename, function () {
             })
             .build();
 
-            pipeFoo.request({}, function () {
+            pipeFoo.create().request({}, function () {
                 Assert.deepEqual([
                     'foo1',
                     'foo2',
@@ -2382,7 +2479,8 @@ describe(__filename, function () {
                     pipe.respond();
                 });
             })
-            .build();
+            .build()
+            .create();
 
             pipeBar = Trooba
             .use(function bar1(pipe) {
@@ -2415,7 +2513,8 @@ describe(__filename, function () {
                     next();
                 });
             })
-            .build();
+            .build()
+            .create();
 
             pipeFoo.next.link(pipeBar);
             order = [];
@@ -2496,7 +2595,7 @@ describe(__filename, function () {
             it('should trace the modified pipe', function (next) {
                 order = [];
 
-                pipeFoo.trace(function (err, list) {
+                pipeFoo.create().trace(function (err, list) {
                     Assert.deepEqual([
                         'pipeHead-req',
                         'foo1-req',
@@ -2525,6 +2624,7 @@ describe(__filename, function () {
                 order = [];
 
                 pipeFoo
+                .create()
                 .request({}, function () {
                     Assert.deepEqual([
                         'foo1',
@@ -2577,7 +2677,8 @@ describe(__filename, function () {
                         pipe.respond();
                     });
                 })
-                .build();
+                .build()
+                .create();
 
                 pipeBar = Trooba
                 .use(function bar1(pipe) {
@@ -2712,7 +2813,7 @@ describe(__filename, function () {
 
                     order = [];
 
-                    pipeBar.request({}, function () {
+                    pipeBar.create().request({}, function () {
                         Assert.deepEqual([
                             'bar1',
                             'bar2',
@@ -2867,7 +2968,8 @@ describe(__filename, function () {
                         pipe.respond();
                     });
                 })
-                .build();
+                .build()
+                .create();
 
                 var toPipe = Trooba
                 .use(function bar1(pipe) {
@@ -2925,6 +3027,7 @@ describe(__filename, function () {
 
 
                 mainPipe
+                .create()
                 .trace(function (err, list) {
                     var order = list.map(function (item) {
                         return item.point.handler.name;
@@ -2985,6 +3088,7 @@ describe(__filename, function () {
                     });
                 })
                 .build()
+                .create()
                 .trace();
             });
 
@@ -3017,6 +3121,7 @@ describe(__filename, function () {
                         done();
                     }
                 })
+                .create()
                 .trace();
             });
         });
@@ -3024,7 +3129,7 @@ describe(__filename, function () {
     });
 
     it('should access default next and prev without context', function () {
-        var pipe = Trooba.use(function (pipe) {}).build();
+        var pipe = Trooba.use(function (pipe) {}).build().create();
         var nextPoint = pipe.next;
         Assert.ok(pipe.next);
         Assert.ok(nextPoint === pipe.next);
@@ -3037,7 +3142,7 @@ describe(__filename, function () {
         // build a pipe with prev
         pipe = Trooba.use(function prev(pipe) {
         }).use(function (pipe) {
-        }).build();
+        }).build().create();
 
         nextPoint = pipe.next;
         var prevPoint = pipe.next.prev;

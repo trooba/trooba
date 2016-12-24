@@ -30,7 +30,7 @@ It is not another http based server framework like express, koa or hapi. It can 
     * The request object is passed from transport through a set of handlers before getting to the controller
     * The response object is passed in the reversed order from the controller defined by the user through a set of handlers to the transport of the service.
 * Set transport handler or a set of them in the fallback order (http, soap, grpc, mock or custom) for a pipeline.
-* Inject API returned by pipe.build(customApiName) method, mostly useful to provide a protocol specific API, for example, gRPC can expose API defined in proto file as client and service API or soap API defined by wsdl.
+* Inject API that can be returned by pipe.build().create(customApiName) method, mostly useful to provide a protocol specific API, for example, gRPC can expose API defined in proto file as client and service API or soap API defined by wsdl.
 * It supports request/response, pub/sub or a mix of these modes or you can use it as a one-way or bidirectional message bus.
 * You can link different pipelines together in definition or on-the-fly.
 * You can trace the route to troubleshoot any problems or learn some complex pipeline.
@@ -123,16 +123,18 @@ If you really need to support multiple listeners, you can add an event dispatche
 * **use**(handler[, config]) adds a handler to the pipeline
    * *handler* is a function handler(pipe) {} or another pipe to join into this pipe.
    * *config* is a config object for the handler
-* **build*([context]) creates a pipe and returns pipe object or the client object defined by the transport API or via *interface* method. It allows to inject context that would be available to all handlers.
-* **set**(name, value) used set system value to the context. The name is prefixed with '$' that prevents it from being propagated beyond the pipe boundaries.
+* **build**([context]) creates a pipe and returns a generic pipe object.
+* **set**(name, value) used set system value to the context. The name is prefixed with '$' that prevents it from being propagated beyond the current pipe context boundaries.
 * **get**(name) is used to get system value from the context.
 
 ### Pipe API
 
 The pipe object is passed to all handlers and transport during initialization whenever new context is created via trooba.build(context) or pipe.create(context) call.
 
-* **create**([context]) creates a pipeline with new context or clones from the existing one if any present. The method is mandatory to initiate a new flow, otherwise the subsequent call will fail.
-* **link**(pipe) links given pipeline into the existing one. The link between pipes exists as long as the context where they were linked exists. Once pipe.create is used, it will lose the link. This is useful to link pipes on the fly, for example to bootstrap pipe from config file and inline it into existing pipeline where bootstrap handler is registered.
+* **create**([context], [customApiImpl]) creates a pipeline with new context or clones from the existing one if any present. The method is mandatory to initiate a new flow, otherwise the subsequent call will fail.
+     * **context** is a context object to be used in request/message flow.
+     * **customApiImpl** is a name for a specific API implementation. It allows to inject custom API provided by one of the handlers that needs to be returned instead of the generic pipe interface.
+* **link**(pipe) links passed pipeline to the current one. The link between pipes exists as long as the context where they were linked exists. Once pipe.create is used, it will lose the link. The linking can be useful to join pipes on the fly, for example to bootstrap pipe from config file and inline it into existing pipeline where bootstrap handler is registered.
 ```js
 Trooba.use(function bootstrapPipe(pipe) {
     // load all the handlers from some json or config file
@@ -421,12 +423,14 @@ function createMockTransport() {
     };
 }
 
-var client = Trooba
+var pipe = Trooba
     .use(retry, { retry: 1 })
     .use(createMockTransport())
     .build();
 
-client.request({}, function (err, response) {
+pipe
+.create()
+.request({}, function (err, response) {
     Assert.ok(!err, err && err.stack);
     Assert.equal('some text', response);
     Assert.equal(1, retryCounter);
@@ -453,6 +457,7 @@ Trooba
     })
 })
 .build()
+.create()
 .tracer(function (message, pipePoint) {
     route.push(pipePoint.handler.name);
 })
@@ -474,6 +479,7 @@ Trooba
     })
 })
 .build()
+.create()
 .trace(function onResult(err, listOfPoints) {
     var list = listOfPoints.reduce((list, point) => {
         list.push(point._id);
@@ -491,6 +497,7 @@ To make sure a specific message type or request/response reach the destination, 
 Trooba
 .use()
 .build()
+.create()
 .set('strict', ['request', 'response'])
 .request('request', function () {
     console.log(route);
@@ -505,7 +512,7 @@ It can also provide a custom API that cab be injected into context using pipe.se
 
 For example:
 ```js
-var service = pipe.build('service:hello');
+var service = pipe.build().create('service:hello');
 service.hello('John');
 ```
 
@@ -581,13 +588,13 @@ var pipe = Trooba.use(transportFactory, {
 
 // REQUEST execution
 // ========================================= //
-pipe.request({
+pipe.create().request({
     q: 'nike'
 }, (err, response) => console.log);
 
 // or you can skip callback and listen to events
 // ========================================= //
-pipe.request({
+pipe.create().request({
     q: 'nike'
 })
 .on('error', console.error)
@@ -654,7 +661,7 @@ var client = Trooba.use(transportFactory(), {
     protocol: 'http:',
     hostname: 'www.google.com',
     path: '/search'
-}).build('client');
+}).build().create('client');
 
 client.search('nike', console.log);
 ```
@@ -673,7 +680,8 @@ require('trooba')
         hostname: 'myapi.service.xyz'
         socketTimeout: 1000
     })
-    .build('client')
+    .build()
+    .create('client')
     .get({
         q: 'nike'
     })
@@ -695,7 +703,8 @@ require('trooba')
         connectTimeout: 100,
         socketTimeout: 1000
     })
-    .build('client')
+    .build()
+    .create('client')
     .get({
         q: 'nike'
     })
@@ -719,7 +728,8 @@ require('trooba')
         port: 50001,
         proto: require.resolve('path/to/hello.proto')
     })
-    .build('client')
+    .build()
+    .create('client')
     .hello('Bob', function (err, response) {
         console.log(err, response)
     });
@@ -735,5 +745,6 @@ require('trooba')
         });
     })
     .build()
+    .create()
     .request({foo:'bar'}, console.log);
 ```

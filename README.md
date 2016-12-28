@@ -53,7 +53,35 @@ npm install trooba --save
 
 ## Usage
 
-#### Build a pipe
+#### Http client example
+
+Example on how the pipe for http calls can be configured is below. The handlers are not provided except for transport and need to be built. You can try simpler working examples mentioned down this page.
+
+```js
+require('trooba')
+    .use('circuit')
+    .use('retry')
+    .use('logging')
+    .use('tracing')
+    .use('security')
+    .use('tracking')
+    .use('trooba-http-transport', {
+        protocol: 'http:',
+        hostname: 'www.google.com',
+        connectTimeout: 100,
+        socketTimeout: 1000
+    })
+    .build()                    // build the pipe
+    .create({ foo: 'bar' })     // inject context
+    .request({                  // initiate a request
+        q: 'nike',
+        method: 'GET'
+    }, function (err, response) {// get the results
+        console.log(err || response.body.toString());
+    });
+```
+
+#### Building a pipe
 
 ```js
 var pipe = require('trooba')
@@ -134,6 +162,7 @@ The pipe object is passed to all handlers and transport during initialization wh
 * **create**([context], [customApiImpl]) creates a pipeline with new context or clones from the existing one if any present. The method is mandatory to initiate a new flow, otherwise the subsequent call will fail.
      * **context** is a context object to be used in request/message flow.
      * **customApiImpl** is a name for a specific API implementation. It allows to inject custom API provided by one of the handlers that needs to be returned instead of the generic pipe interface.
+* **context** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed. The values in the context that have their names started with '$' will not be propagated beyond the pipe boundaries. To access context one can use pipe.context;
 * **link**(pipe) links passed pipeline to the current one. The link between pipes exists as long as the context where they were linked exists. Once pipe.create is used, it will lose the link. The linking can be useful to join pipes on the fly, for example to bootstrap pipe from config file and inline it into existing pipeline where bootstrap handler is registered.
 ```js
 Trooba.use(function bootstrapPipe(pipe) {
@@ -148,18 +177,17 @@ Trooba.use(function bootstrapPipe(pipe) {
 });
 ```
 * **request**(requestObject) creates and sends an arbitrary request down the pipeline. If context was not used, it will implicitly call *create* method
+* **respond**(responseObject) initiates a response flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated.
+* **resume**() resumes the processing in the given pipe point in ordered flow whenever the current message/response/request flow was paused due to processing of the ordered message and it was suppressed/swallowed, i.e. no throw/response/request/next action followed.
 * **streamRequest**(requestObject) creates and sends an arbitrary request down the pipeline. If context was not used. It returns write stream with methods:
     * **write(data)** write a chunk to the stream as "request:data" message
     * **end()** ends the stream and send "request:end" message
-* **throw**(Error) sends the error down the response pipeline. If no error hooks defined in the pipeline, it will throw error. The method can be called only after the response flow is initiated.
-* **respond**(responseObject) - initiates a response flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated.
 * **streamResponse**(responseObject) - initiates a response stream flow and sends an arbitrary response object down the response pipeline. This can be called only after the request flow is initiated. It returns write stream with methods:
     * **write(data)** write a chunk to the stream as "response:data" message
     * **end()** ends the stream and send "response:end" message
 * **send**(message) sends a message down the request or response flow depending on the message type. For more details see message structure below. The method can be used to send a custom message.
-* **tracer**([Function trace(message, point)]) enables tracing for the messages. It is kind of a visitor pattern. The function will be called for any message going through every pipe point and you are free to use it in any way imaginable. One obvious option is to trace the route using a special message type or trace request/response route with request and response.
+* **throw**(Error) sends the error down the response pipeline. If no error hooks defined in the pipeline, it will throw error. The method can be called only after the response flow is initiated.
 * **trace**([Function callback(err, listOfPoints)]) is to trace the route that any message would travel, it uses message.type = 'trace' and returns a list of point it traveled in request/response flow.
-* **context** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed. The values in the context that have their names started with '$' will not be propagated beyond the pipe boundaries.
 * **set**(name, value) sets arbitrary system key-value pair to the context which will not be explicitly propagated beyond transport boundaries as internally the name will be prefixed as $name. It is used to provide custom API by handlers.
 * **get**(name) reads system value from the context.
 
@@ -175,6 +203,7 @@ The current message structure:
     * 2 - response
 * **ref** is a reference to the data being sent in the message
 * **sync** is boolean, if equals true, the message will be propagated to all pipe points at the same time, no callback is needed to control when to send it to the next handler in the pipeline.
+* **order** is boolean value that controls order, if set to true, the message will be queued at any pipe point if similar ordered message is already in process by the given point.
 * The rest of the fields will be assigned by the framework and should not be changed
 
 Example:
@@ -196,12 +225,32 @@ Trooba.use(handler)
 When a message is expired, it will be dropped through console.log by default or you can intercept it by registering your own onDrop handler to the context
 ```js
 Trooba.build({
-    ttl: 2000,
+    ttl: 2000, // msec
     onDrop: function (message) {
         console.log('dropped message:', message);
     }
 })
 ```
+
+### Streaming support
+
+Trooba provides streaming of messages using its own logic instead of using nodejs native streaming to provide isomorphism. Whenever one would like to use nodejs streams, he/she can do this by wrapping it into [trooba-streaming](https://github.com/trooba/trooba-streaming) adaptors that provide nodejs native streams. For example, one can look at [trooba-grpc-transport](https://github.com/trooba/trooba-grpc-transport).
+
+The framework support two stream modes, ordered and un-ordered. By default only request and response streaming flow are ordered.
+
+If one would like to enable ordering for other type of messages, he/she can use order attribute in the message object:
+```js
+pipe.send({
+    type: 'custom',
+    flow: Types.REQUEST,
+    ref: 'some data',
+    order: true
+})
+```
+
+When pipe point accepts ordered message for processing, i.e. it has request/response/data handlers registered, it will pause the point for any other ordered message that comes afterwards. The point will be resumed whenever the given message is transferred further via next() call or new message is originated via pipe.request/pipe.respond/stream.write/stream.end. If none of the actions happens, in case one wants to suppress the current data, one can resume the point using pipe.resume() call. *Note:* pipe.throw() will not resume the pipe.
+
+The method pipe.trace() can be used to get information about state of the points including if any of them has non-empty queue (pipe.queue.size() > 0), i.e. is in a paused state.
 
 ### Handler definition
 
@@ -679,7 +728,7 @@ require('trooba')
         socketTimeout: 1000
     })
     .build()
-    .create('client')
+    .create('client:default')
     .get({
         q: 'nike'
     })
@@ -702,12 +751,12 @@ require('trooba')
         socketTimeout: 1000
     })
     .build()
-    .create('client')
+    .create('client:default')
     .get({
         q: 'nike'
     })
     .set('some', 'header')
-    .end(function (err, response) {
+    .end((err, response) => {
         console.log(err, response && response.body)
     });
 ```
@@ -727,7 +776,7 @@ require('trooba')
         proto: require.resolve('path/to/hello.proto')
     })
     .build()
-    .create('client')
+    .create('client:default')
     .hello('Bob', function (err, response) {
         console.log(err, response)
     });

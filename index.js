@@ -13,6 +13,7 @@ Trooba.prototype = {
 
     use: function use(handler, config) {
         if (typeof handler === 'string') {
+console.log('--->', handler)            
             handler = require(handler);
         }
 
@@ -128,14 +129,6 @@ PipePoint.prototype = {
             throw new Error('The context has not been initialized, make sure you use pipe.create()');
         }
 
-        message.ttl = message.ttl !== undefined ? message.ttl :
-            (Date.now() + (this.context && this.context.ttl || TTL));
-        if (message.ttl < Date.now()) {
-            // onDrop message and let user know
-            (this.context && this.context.onDrop || module.exports.onDrop)(message);
-            return;
-        }
-
         // pick the direction
         var nextPoint;
         if (message.stage === Stages.PROCESS) {
@@ -144,6 +137,18 @@ PipePoint.prototype = {
         else {
             nextPoint = message.flow === Types.REQUEST ? this._next$ : this._prev$;
             message.stage = Stages.TRANSIT;
+            // unbound message from this point if any
+            if (message.order && this._id === message.pointId) {
+                this.queue().done(message);
+            }
+        }
+        // drop message if needed
+        message.ttl = message.ttl !== undefined ? message.ttl :
+            (Date.now() + (this.context && this.context.ttl || TTL));
+        if (message.ttl < Date.now()) {
+            // onDrop message and let user know
+            (this.context && this.context.onDrop || module.exports.onDrop)(message);
+            return;
         }
 
         if (nextPoint) {
@@ -249,13 +254,18 @@ PipePoint.prototype = {
         });
     },
 
+    resume: function resume() {
+        var queue = this.queue();
+        queue && queue.resume();
+    },
+
     process: function process$(message) {
         var point = this;
-        var messageHandlers;
 
         // get the hooks
-        messageHandlers = this.handlers(message.context);
+        var messageHandlers = this.handlers(message.context);
 
+        // handle linked pipes first
         var processMessage = messageHandlers.$link$;
         if (processMessage) {
             // for request flow first process through regular hooks if any
@@ -290,16 +300,22 @@ PipePoint.prototype = {
             });
         }
 
+        if (point.queue().size(message.context) > 0 &&
+                queueAndIfQueued(message)) {
+            return;
+        }
+
         var anyType;
         processMessage = messageHandlers[message.type];
         if (!processMessage) {
             processMessage = messageHandlers['*'];
             anyType = true;
         }
-        // let's detect if link action occures in the hook handler
-        // and use number of points added to the context;
-        // which would change if linking happens
+
         if (processMessage) {
+            if (queueAndIfQueued(message)) {
+                return;
+            }
             // if sync delivery, than no callback needed before propagation further
             processMessage(anyType ? message : message.ref,
                     message.sync ? undefined : onComplete, message.context);
@@ -341,12 +357,22 @@ PipePoint.prototype = {
                 var endHandler = messageHandlers[
                     message.flow === Types.REQUEST ? 'request:end' : 'response:end'];
                 if (endHandler) {
+                    if (queueAndIfQueued(message)) {
+                        return true;
+                    }
                     endHandler(function onComplete() {
                         point.send(message);
                     });
                     return true;
                 }
             }
+        }
+
+        function queueAndIfQueued(message) {
+            // keep the order for ordered class of messages
+            // if point is in process of similar message, the point is paused
+            // for the given message till the processing is done
+            return message.order && point.queue().add(message);
         }
     },
 
@@ -425,39 +451,58 @@ PipePoint.prototype = {
 
     request: function request$(request, callback) {
         var point = this;
-        if (!point.context) {
-            // create default context
-            point = point.create({});
-        }
+        this.resume();
 
         function sendRequest() {
-            point.send({
+            var msg = {
                 type: 'request',
                 flow: Types.REQUEST,
                 ref: request
-            });
+            };
+            if (point.context.$requestStream) {
+                msg.order = true; // order only streams
+            }
+            point.send(msg);
         }
 
         if (callback) {
             point
             .on('error', function (err) { callback(err); })
-            .on('response', function (res) { callback(null, res); });
+            .on('response', function (res) {
+                point.resume();
+                callback(null, res);
+            });
 
             sendRequest();
             return point;
         }
 
-        this.context.$requestStream ? sendRequest() : setTimeout(sendRequest, 0);
+        // this.context.$requestStream ? sendRequest() : setTimeout(sendRequest, 0);
+        setTimeout(sendRequest, 0);
 
         return point;
     },
 
     respond: function respond$(response) {
-        this.send({
-            type: 'response',
-            flow: Types.RESPONSE,
-            ref: response
-        });
+        var point = this;
+        this.resume();
+
+        function sendResponse() {
+            var msg = {
+                type: 'response',
+                flow: Types.RESPONSE,
+                ref: response
+            };
+
+            if (point.context.$responseStream) {
+                msg.order = true;
+            }
+
+            point.send(msg);
+        }
+
+        // this.context.$responseStream ? sendResponse() : setTimeout(sendResponse, 0);
+        setTimeout(sendResponse, 0);
 
         return this;
     },
@@ -511,8 +556,11 @@ PipePoint.prototype = {
 
     handlers: function handlers$(ctx) {
         var pointCtx = this._pointCtx(ctx);
-        pointCtx._messageHandlers = pointCtx._messageHandlers || {};
-        return pointCtx._messageHandlers;
+        return pointCtx._messageHandlers = pointCtx._messageHandlers || {};
+    },
+
+    queue: function queue$() {
+        return this._queue = this._queue || new Queue(this);
     }
 };
 
@@ -555,12 +603,15 @@ function createWriteStream(ctx) {
         if (data === undefined) {
             ctx.channel._streamClosed = true;
         }
-
-        channel.send({
-            type: type,
-            flow: ctx.flow,
-            ref: data
-        });
+        channel.resume();
+        setTimeout(function defer() {
+            channel.send({
+                type: type,
+                flow: ctx.flow,
+                ref: data,
+                order: true
+            });
+        }, 0);
     }
 
     return {
@@ -575,3 +626,77 @@ function createWriteStream(ctx) {
         }
     };
 }
+
+function Queue(pipe) {
+    this.pipe = pipe;
+}
+
+module.exports.Queue = Queue;
+
+Queue.prototype = {
+    size: function size$(context) {
+        return context ? this.getQueue(context).length : 0;
+    },
+
+    getQueue: function getQueue(context) {
+        if (context) {
+            var pointCtx = this.pipe._pointCtx(context);
+            return pointCtx.queue = pointCtx.queue || [];
+        }
+    },
+
+    // return true, if message prcessing should be paused
+    add: function add(message) {
+        if (!message.order || // no keep order needed
+                message.pointId === this.pipe._id) {// or already in process
+            message.processed = true;
+            return false; // should continue
+        }
+
+        var queue = this.getQueue(message.context);
+        queue.unshift(message); // FIFO
+        message.pointId = this.pipe._id;
+        var moreInQueue = queue.length > 1;
+
+        message.processed = !moreInQueue;
+        return moreInQueue;
+    },
+
+    resume: function resume() {
+        var self = this;
+        var point = this.pipe;
+        setTimeout(function deferResume() {
+            var queue = self.getQueue(point.context);
+            if (!queue) {
+                return;
+            }
+            var msg = queue[queue.length - 1];
+            if (msg) {
+                if (msg.processed) {
+                    // only resume if it was paused
+                    return self.done(msg);
+                }
+            }
+        }, 0);
+    },
+
+    done: function done(message) {
+        var point = this.pipe;
+        var queue = this.getQueue(message.context);
+        var msg = queue.pop();
+        if (msg !== message) {
+            throw new Error('The queue for ' + this.pipe._id + ' is broken');
+        }
+        // unbound message from this point
+        message.pointId = undefined;
+        delete message.processed;
+
+        // handle next message
+        msg = queue[queue.length - 1];
+        if (msg) {
+            setTimeout(function () {
+                point.process(msg);
+            }, 0);
+        }
+    }
+};

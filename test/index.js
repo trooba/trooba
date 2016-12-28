@@ -977,7 +977,6 @@ describe(__filename, function () {
 
     it('should link two pipes via "use", propagate request, response and do trace', function (done) {
         var order = [];
-        var route = [];
         var pipe1 = Trooba
         .use(function h1_1(pipe) {
             pipe.on('request', function onRequest(request, next) {
@@ -1052,9 +1051,14 @@ describe(__filename, function () {
             p: 2
         });
 
-        pipe.create().tracer(function (message, pipePoint) {
-            route.push(pipePoint.handler.name + (message.flow === 1 ? '-req' : '-res'));
-        }).request({
+        var route = [];
+
+        pipe.create({
+            trace: function (point, message) {
+                route.push(point.handler.name + '-' + (message.flow === 1 ? 'req' : 'res'));
+            }
+        })
+        .request({
             foo: 'bar'
         })
         .on('response', function (response) {
@@ -2058,7 +2062,9 @@ describe(__filename, function () {
                     'foo1-req',
                     'foo1-res',
                     'pipeHead-res'
-                ], list.map(function (p) {return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');}));
+                ], list.map(function (p) {
+                    return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');
+                }));
                 next();
             });
         });
@@ -4102,8 +4108,75 @@ describe(__filename, function () {
             // specific to the protocol one uses
         });
 
-        it.skip('should trace pipe points, return state of each point with queue length in each', function (next) {
+        it('should trace pipe points, return state of each point with queue length in each', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('response:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 50);
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request, next) {
+                    stream = pipe.streamResponse(request);
+                    next();
 
+                    setTimeout(function () {
+                        pipe.send({
+                            type: 'foo',
+                            ref: 'foo',
+                            flow: 2
+                        });
+                    }, 10);
+                    setTimeout(function () {
+                        pipe.send({
+                            type: 'foo',
+                            ref: 'bar',
+                            flow: 2
+                        });
+                    }, 15);
+                });
+
+                pipe.on('request:data', function (data) {
+                    stream.write(data);
+                });
+            })
+            .build();
+
+            var order = [];
+
+            var client = pipe.create();
+            client.streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end()
+            .on('response:data', function (data, next) {
+                if (data) {
+                    order.push(data);
+                    return next();
+                }
+                Assert.deepEqual(['foo', 'bar', 'd1', 'd2'], order);
+
+            })
+            .on('foo', function (data) {
+                order.push(data);
+            });
+
+            setTimeout(function () {
+                client.trace(function (err, list) {
+
+                    var route = list.map(function (item) {
+                        var point = item.point;
+                        return point.handler.name + '(' + point.queue().size() + ')';
+                    });
+                    Assert.deepEqual([
+                        'pipeHead(0)', 'h1(3)', 'h2(0)', 'h2(0)', 'h1(3)', 'pipeHead(0)'
+                    ], route);
+                    done();
+                });
+            }, 20);
         });
     });
 

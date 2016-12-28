@@ -4,13 +4,26 @@
 * Allow to link on-the-fly in message/request flow, not just at context init time.
 * Removed context init from trooba.build() call. Now it should only happen at pipe.create(). Build will only construct the pipeline and cache it with generic context.
 * Removed selecting custom API from trooba.build() call. Now one should only use pipe.create(ctx, 'custom-api-name');
-* Increased default message TTL to 15sec and added option to configure ttl via config.
+* Increased default message TTL to Infinity and added option to configure ttl via config.
 ```js
 pipe.build({
     ttl: 2000 // msec
 })
 ```
 * Request/response streaming preserve message order to avoid order conflicts.
+* Changed tracing to use trace function as part of the context
+```js
+pipe.build()
+.create({
+    trace: function (point, message) {
+        // collect points
+        route.push(point.handler.name + '-' + (message.flow === 1 ? 'req' : 'res'))
+    }
+})
+.request('request', function () {
+    console.log(route.join('->'));
+});
+```
 
 ## v1.0.2
 * link two pipes together on-the-fly, it is good to bootstrap the pipe from config file.

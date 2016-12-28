@@ -491,30 +491,6 @@ The framework allows to trace any and all messages.
 Useful when the complexity of the pipeline requires one to check the route the message travels.
 
 ```js
-var route = [];
-
-Trooba
-.use(function h1(pipe) {
-})
-.use(function h2(pipe) {
-})
-.use(function tr(pipe) {
-    pipe.on('request', function () {
-        pipe.respond('response')
-    })
-})
-.build()
-.create()
-.tracer(function (message, pipePoint) {
-    route.push(pipePoint.handler.name);
-})
-.request('request', function () {
-    console.log(route);
-});
-```
-
-Or you can just trace the route
-```js
 Trooba
 .use(function h1(pipe) {
 })
@@ -533,7 +509,34 @@ Trooba
         return list;
     });
     console.log('The route is ', list.join('->'))
-}, []);
+});
+```
+
+Or more flexible option to monitor the pipe
+
+```js
+var route = [];
+
+Trooba
+.use(function h1(pipe) {
+})
+.use(function h2(pipe) {
+})
+.use(function tr(pipe) {
+    pipe.on('request', function () {
+        pipe.respond('response');
+    });
+})
+.build()
+.create({
+    trace: function (point, message) {
+        route.push(point.handler.name + '-' + (message.flow === 1 ? 'req' : 'res'))
+
+    }
+})
+.request('request', function () {
+    console.log(route.join('->'));
+});
 ```
 
 ### Enforcing delivery

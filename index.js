@@ -1,6 +1,6 @@
 'use strict';
 
-var TTL = 15000;
+var TTL = Infinity;
 
 /**
  * Assigns transport to the client pipeline
@@ -13,7 +13,6 @@ Trooba.prototype = {
 
     use: function use(handler, config) {
         if (typeof handler === 'string') {
-console.log('--->', handler)            
             handler = require(handler);
         }
 
@@ -169,7 +168,7 @@ PipePoint.prototype = {
                 message.type + ' ' + JSON.stringify(message.ref)));
         }
         else if (message.type === 'trace' && message.flow === Types.REQUEST) {
-            message.flow = Types.RESPONSE;
+            message.flow = Types.RESPONSE; // reverse the route
             this.process(message);
         }
 
@@ -188,12 +187,6 @@ PipePoint.prototype = {
         ret.context = context;
         ret._pointCtx();
         return ret;
-    },
-
-    tracer: function tracer$(tracer) {
-        this.context.trace = true;
-        this.context.tracer$ = tracer;
-        return this;
     },
 
     set: function set$(name, value) {
@@ -238,19 +231,26 @@ PipePoint.prototype = {
     trace: function trace$(callback) {
         var self = this;
         callback = callback || console.log;
+        var route = [{
+            point: this,
+            flow: Types.REQUEST
+        }];
         this.once('trace', function (list) {
             self.removeListener('error');
-            callback(null, list);
+            callback(null, route);
         });
         this.once('error', callback);
 
         this.send({
             type: 'trace',
             flow: Types.REQUEST,
-            ref: [{
-                point: this,
-                flow: Types.REQUEST
-            }]
+            trace: function trace(point, message) {
+                route.push({
+                    point: point,
+                    flow: message.flow,
+                    stage: message.stage
+                });
+            }
         });
     },
 
@@ -288,16 +288,11 @@ PipePoint.prototype = {
             }
         }
 
-        if (message.context && message.context.trace && message.context.tracer$) {
-            message.context.tracer$(message, point);
-        }
-
-        if (message.type === 'trace') {
-            message.ref.push({
-                point: this,
-                flow: message.flow,
-                stage: message.stage
-            });
+        if (message.context.trace || message.type === 'trace') {
+            var traceFn = message.context.trace || message.trace;
+            if (typeof traceFn === 'function') {
+                traceFn(this._pointCtx(message.context).ref, message);
+            }
         }
 
         if (point.queue().size(message.context) > 0 &&
@@ -635,6 +630,7 @@ module.exports.Queue = Queue;
 
 Queue.prototype = {
     size: function size$(context) {
+        context = context || this.pipe.context;
         return context ? this.getQueue(context).length : 0;
     },
 

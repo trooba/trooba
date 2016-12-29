@@ -163,7 +163,7 @@ PipePoint.prototype = {
         else if (message.context &&
             message.context.validate &&
             message.context.validate[message.type]) {
-                
+
             this.copy(message.context).throw(new Error('No target consumer found for the ' +
                 message.type + ' ' + JSON.stringify(message.ref)));
         }
@@ -425,6 +425,17 @@ PipePoint.prototype = {
         });
     },
 
+    _exposePipeHooks: function exposePipeHooks(point, stream) {
+        stream.on = function onHook(type, handler) {
+            point.on(type, handler);
+            return stream;
+        };
+        stream.once = function onHook(type, handler) {
+            point.once(type, handler);
+            return stream;
+        };
+    },
+
     streamRequest: function streamRequest$(request) {
         this.context.$requestStream = true;
         var point = this.request(request);
@@ -432,14 +443,8 @@ PipePoint.prototype = {
             channel: point,
             flow: Types.REQUEST
         });
-        writeStream.on = function onHook(type, handler) {
-            point.on(type, handler);
-            return writeStream;
-        };
-        writeStream.once = function onHook(type, handler) {
-            point.once(type, handler);
-            return writeStream;
-        };
+
+        this._exposePipeHooks(point, writeStream);
         point.context.$requestStream = writeStream;
         return writeStream;
     },
@@ -506,10 +511,12 @@ PipePoint.prototype = {
         this.context.$responseStream = true;
         var point = this.respond(response);
 
-        return this.context.$responseStream = createWriteStream({
+        var steram = this.context.$responseStream = createWriteStream({
             channel: point,
             flow: Types.RESPONSE
         });
+        this._exposePipeHooks(point, steram);
+        return steram;
     },
 
     /*
@@ -610,6 +617,10 @@ function createWriteStream(ctx) {
     }
 
     return {
+        flow: ctx.flow,
+        
+        point: channel,
+
         write: function write$(data) {
             _write(data);
             return this;

@@ -2,6 +2,11 @@
 
 var TTL = Infinity;
 
+var defer = process && process.nextTick && process.nextTick.bind(process) ||
+    setImmediate || function defer(fn) {
+        setTimeout(fn, 0); // this is much slower then setImmediate or nextTick
+    };
+
 /**
  * Assigns transport to the client pipeline
 */
@@ -313,7 +318,7 @@ PipePoint.prototype = {
             }
             // if sync delivery, than no callback needed before propagation further
             processMessage(anyType ? message : message.ref,
-                    message.sync ? undefined : onComplete, message.context);
+                    message.sync ? undefined : onComplete);
             if (!message.sync) {
                 // onComplete would continued the flow
                 return;
@@ -477,8 +482,8 @@ PipePoint.prototype = {
             return point;
         }
 
-        // this.context.$requestStream ? sendRequest() : setTimeout(sendRequest, 0);
-        setTimeout(sendRequest, 0);
+        // this.context.$requestStream ? sendRequest() : defer(sendRequest, 0);
+        defer(sendRequest);
 
         return point;
     },
@@ -501,8 +506,7 @@ PipePoint.prototype = {
             point.send(msg);
         }
 
-        // this.context.$responseStream ? sendResponse() : setTimeout(sendResponse, 0);
-        setTimeout(sendResponse, 0);
+        defer(sendResponse);
 
         return this;
     },
@@ -606,19 +610,19 @@ function createWriteStream(ctx) {
             ctx.channel._streamClosed = true;
         }
         channel.resume();
-        setTimeout(function defer() {
+        defer(function defer() {
             channel.send({
                 type: type,
                 flow: ctx.flow,
                 ref: data,
                 order: true
             });
-        }, 0);
+        });
     }
 
     return {
         flow: ctx.flow,
-        
+
         point: channel,
 
         write: function write$(data) {
@@ -672,7 +676,7 @@ Queue.prototype = {
     resume: function resume() {
         var self = this;
         var point = this.pipe;
-        setTimeout(function deferResume() {
+        defer(function deferResume() {
             var queue = self.getQueue(point.context);
             if (!queue) {
                 return;
@@ -684,7 +688,7 @@ Queue.prototype = {
                     return self.done(msg);
                 }
             }
-        }, 0);
+        });
     },
 
     done: function done(message) {
@@ -701,9 +705,9 @@ Queue.prototype = {
         // handle next message
         msg = queue[queue.length - 1];
         if (msg) {
-            setTimeout(function () {
+            defer(function () {
                 point.process(msg);
-            }, 0);
+            });
         }
     }
 };

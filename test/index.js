@@ -528,8 +528,11 @@ describe(__filename, function () {
                     });
                 })
                 .build()
-                .create()
-                .set('strict', 'response')
+                .create({
+                    validate: {
+                        response: true
+                    }
+                })
                 .request({
                     foo: 'bar'
                 });
@@ -542,7 +545,7 @@ describe(__filename, function () {
             });
         });
 
-        it.skip('should not send error back if no target consumer found when the request is disabled', function (done) {
+        it('should send error back if no target consumer found when the request is enforced', function (done) {
             var order = [];
             var domain = Domain.create();
             domain.run(function () {
@@ -558,7 +561,7 @@ describe(__filename, function () {
                 })
                 .build({
                     validate: {
-                        // request: false
+                        request: true
                     }
                 })
                 .create()
@@ -568,7 +571,7 @@ describe(__filename, function () {
             });
 
             domain.once('error', function (err) {
-                Assert.equal('No target consumer found for the response "ok"', err.message);
+                Assert.equal('No target consumer found for the request {"foo":"bar"}', err.message);
                 Assert.deepEqual(['zx1', 'zx2'], order);
                 done();
             });
@@ -593,8 +596,11 @@ describe(__filename, function () {
                     });
                 })
                 .build()
-                .create()
-                .set('strict', ['response'])
+                .create({
+                    validate: {
+                        response: true
+                    }
+                })
                 .request({
                     foo: 'bar'
                 });
@@ -853,8 +859,11 @@ describe(__filename, function () {
             order.push('zx3');
         })
         .build()
-        .create()
-        .set('strict', 'request')
+        .create({
+            validate: {
+                request: true
+            }
+        })
         .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
@@ -4099,13 +4108,6 @@ describe(__filename, function () {
             pipe.create()
             .request('r1');
 
-        });
-
-        it.skip('should pause request data messages till request is sent/accepted', function (next) {
-            // Edge case that requires understanding of the specific flow.
-            // Usualy one hold requests and its data submission till connection is established
-            // to avoid dealing with re-try and data synchronization or support a special retry logic
-            // specific to the protocol one uses
         });
 
         it('should trace pipe points, return state of each point with queue length in each', function (done) {

@@ -160,10 +160,10 @@ PipePoint.prototype = {
         else if (message.type === 'error') {
             throw message.ref;
         }
-        else if (message.context && (message.context.$strict &&
-            message.context.$strict.indexOf(message.type) !== -1 ||
-            message.context.validate && message.context.validate[message.type]
-        )) {
+        else if (message.context &&
+            message.context.validate &&
+            message.context.validate[message.type]) {
+                
             this.copy(message.context).throw(new Error('No target consumer found for the ' +
                 message.type + ' ' + JSON.stringify(message.ref)));
         }

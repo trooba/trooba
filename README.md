@@ -541,14 +541,18 @@ Trooba
 
 ### Enforcing delivery
 
-To make sure a specific message type or request/response reach the destination, one can use set('strict', type) fpr one type or an array of types.
+To make sure a specific message type or request/response reach the destination, one can set validate options.
 
 ```js
 Trooba
 .use()
 .build()
-.create()
-.set('strict', ['request', 'response'])
+.create({
+    validate: {
+        request: true,
+        response: true
+    }
+})
 .request('request', function () {
     console.log(route);
 });

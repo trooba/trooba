@@ -35,7 +35,7 @@ It is not another http based server framework like express, koa or hapi. It can 
 * You can link different pipelines together in definition or on-the-fly.
 * You can trace the route to troubleshoot any problems or learn some complex pipeline.
 
-![pipeline flow](./docs/images/arch3.png)
+![pipeline flow](./docs/images/arch4.png)
 
 ## Get Involved
 
@@ -787,6 +787,62 @@ require('trooba')
     .hello('Bob', function (err, response) {
         console.log(err, response)
     });
+```
+
+### gRPC service
+
+```js
+var pipeServer = Trooba.use(transport, {
+    port: port,
+    hostname: 'localhost',
+    proto: Grpc.load(require.resolve('./path/to/hello.proto'))
+})
+.use(function handler(pipe) {
+    pipe.on('request', (request, next) => {
+        // do something with request
+        console.log('gRPC request metadata:', request.headers);
+        next();
+    });
+    pipe.on('request:data', (data, next) => {
+        // do something with request stream data chunk
+        console.log('request chunk:', data);
+        next();
+    });
+    pipe.on('request:end', (data, next) => {
+        // do something with stream end
+        console.log('end of request stream');
+        next();
+    });
+
+    pipe.on('response', (response, next) => {
+        // do something with response
+        console.log('gRPC response metadata:', response.headers);
+        next();
+    });
+    pipe.on('response:data', (data, next) => {
+        // do something with response stream data chunk
+        console.log('response chunk:', data);
+        next();
+    });
+    pipe.on('response:end', (data, next) => {
+        // do something with end of response stream
+        console.log('end of response stream');
+        next();
+    });
+})
+.use(function controller(pipe) {
+    // handle request/response here
+    pipe.on('request', request => {
+        pipe.respond({
+            body: 'Hello ' + request.body.name
+        });
+    });
+});
+
+var app = pipeServer.build('server:default');
+
+svr = app.listen();
+console.log('toorba service is listening on port:', port);
 ```
 
 ### Mocking

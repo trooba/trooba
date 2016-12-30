@@ -310,9 +310,7 @@ PipePoint.prototype = {
         }
 
         if (processMessage) {
-            if (queueAndIfQueued(message)) {
-                return;
-            }
+            queueAndIfQueued(message);
             // if sync delivery, than no callback needed before propagation further
             processMessage(anyType ? message : message.ref,
                     message.sync ? undefined : onComplete);
@@ -354,9 +352,6 @@ PipePoint.prototype = {
                 var endHandler = messageHandlers[
                     message.flow === Types.REQUEST ? 'request:end' : 'response:end'];
                 if (endHandler) {
-                    if (queueAndIfQueued(message)) {
-                        return true;
-                    }
                     endHandler(function onComplete() {
                         point.send(message);
                     });

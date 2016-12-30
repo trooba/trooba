@@ -25,6 +25,41 @@ describe(__filename, function () {
         Assert.ok(client.build);
     });
 
+    it('should not invoke init during trooba.build', function (done) {
+        Trooba.use(function tr(pipe) {
+            done(new Error('should not happen'));
+        })
+        .build();
+
+        setImmediate(done);
+    });
+
+    it('should throw error when create was not used before request call', function (done) {
+        var pipe = Trooba.use(function tr(pipe) {
+            pipe.on('request', function (request) {
+                done(new Error('Should never happen'));
+            });
+        })
+        .build();
+
+
+        var domain = Domain.create();
+        domain.run(function () {
+            pipe
+            .request({
+                foo: 'bar'
+            });
+
+        });
+
+        domain.once('error', function (err) {
+            Assert.equal('The context has not been initialized, make sure you use pipe.create()',
+                err.message);
+            done();
+        });
+
+    });
+
     it('should call transport with context', function (done) {
         var pipe = Trooba.use(function tr(pipe) {
             Assert.ok(pipe);
@@ -45,7 +80,8 @@ describe(__filename, function () {
         })
         .build({
             fer: 'thy'
-        });
+        })
+        .create();
 
         pipe
         .on('error', done)
@@ -76,6 +112,7 @@ describe(__filename, function () {
             asd: 'zxc'
         })
         .build()
+        .create()
         .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
@@ -118,7 +155,8 @@ describe(__filename, function () {
                     request));
             });
         })
-        .build('client');
+        .build()
+        .create('client');
 
         client.hello('John', function validateResponse(err, response) {
             Assert.ok(!err, err && err.stack);
@@ -133,7 +171,10 @@ describe(__filename, function () {
             pipe.on('request', function () {
                 pipe.throw(new Error('Test Error'));
             });
-        }).build().request({
+        })
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(err);
@@ -158,6 +199,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
@@ -184,7 +226,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -203,7 +247,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -229,7 +275,9 @@ describe(__filename, function () {
                 done(new Error('Should not happen'));
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -256,7 +304,9 @@ describe(__filename, function () {
                 done(new Error('Should not happen'));
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -288,7 +338,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -322,7 +374,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.ok(!err);
@@ -330,7 +384,10 @@ describe(__filename, function () {
                 foo: 'bar',
                 tra: 'asd',
                 fa1: 'zx1',
-                fa2: 'zx2'
+                fa2: 'zx2',
+                validate: {
+                    request: false
+                }
             }, response);
             done();
         });
@@ -411,7 +468,9 @@ describe(__filename, function () {
                 done(new Error('should not happen'));
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.deepEqual('Test', err.message);
@@ -430,7 +489,7 @@ describe(__filename, function () {
         it('should throw error if context is not set', function (done) {
             var pipe;
             try {
-                pipe = Trooba.use(function (handler) {}).build();
+                pipe = Trooba.use(function (handler) {}).build().create();
                 pipe.context = undefined;
                 pipe.trace();
                 done(new Error('Should have failed'));
@@ -440,7 +499,7 @@ describe(__filename, function () {
             }
 
             try {
-                pipe._points();
+                pipe._pointCtx();
                 done(new Error('Should have failed'));
             }
             catch (err) {
@@ -450,7 +509,7 @@ describe(__filename, function () {
 
         });
 
-        it('should send error back if no target consumer found for the response', function (done) {
+        it('should send error back if no target consumer found for the request by default', function (done) {
             var order = [];
             var domain = Domain.create();
             domain.run(function () {
@@ -469,7 +528,11 @@ describe(__filename, function () {
                     });
                 })
                 .build()
-                .set('strict', 'response')
+                .create({
+                    validate: {
+                        response: true
+                    }
+                })
                 .request({
                     foo: 'bar'
                 });
@@ -477,6 +540,38 @@ describe(__filename, function () {
 
             domain.once('error', function (err) {
                 Assert.equal('No target consumer found for the response "ok"', err.message);
+                Assert.deepEqual(['zx1', 'zx2'], order);
+                done();
+            });
+        });
+
+        it('should send error back if no target consumer found when the request is enforced', function (done) {
+            var order = [];
+            var domain = Domain.create();
+            domain.run(function () {
+                Trooba
+                .use(function handler(pipe) {
+                    order.push('zx1');
+                })
+                .use(function handler(pipe) {
+                    order.push('zx2');
+                })
+                .use(function handler(pipe) {
+
+                })
+                .build({
+                    validate: {
+                        request: true
+                    }
+                })
+                .create()
+                .request({
+                    foo: 'bar'
+                });
+            });
+
+            domain.once('error', function (err) {
+                Assert.equal('No target consumer found for the request {"foo":"bar"}', err.message);
                 Assert.deepEqual(['zx1', 'zx2'], order);
                 done();
             });
@@ -501,7 +596,11 @@ describe(__filename, function () {
                     });
                 })
                 .build()
-                .set('strict', ['response'])
+                .create({
+                    validate: {
+                        response: true
+                    }
+                })
                 .request({
                     foo: 'bar'
                 });
@@ -536,7 +635,9 @@ describe(__filename, function () {
                         done(new Error('should not happen'));
                     });
                 })
-                .build().request({
+                .build()
+                .create()
+                .request({
                     foo: 'bar'
                 });
             });
@@ -627,7 +728,8 @@ describe(__filename, function () {
                 .use(handlerCtxModifier)
                 .use(handlerRequestCounter)
                 .use(transport)
-                .build();
+                .build()
+                .create();
 
             function makeRequest(index, next) {
                 pipe = pipe.create();
@@ -660,7 +762,8 @@ describe(__filename, function () {
                     }, 10);
                 });
             })
-            .build();
+            .build()
+            .create();
 
             var domain = Domain.create();
             domain.run(function () {
@@ -695,7 +798,9 @@ describe(__filename, function () {
                 pipe.respond(request);
             });
         })
-        .build().request({
+        .build()
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.deepEqual({
@@ -730,7 +835,9 @@ describe(__filename, function () {
         })
         .build({
             order: []
-        }).request({
+        })
+        .create()
+        .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
             Assert.equal(['zx1', 'zx2', 'zx3', 'tr'].toString(),
@@ -752,7 +859,11 @@ describe(__filename, function () {
             order.push('zx3');
         })
         .build()
-        .set('strict', 'request')
+        .create({
+            validate: {
+                request: true
+            }
+        })
         .request({
             foo: 'bar'
         }, function validateResponse(err, response) {
@@ -844,6 +955,7 @@ describe(__filename, function () {
         .build({
             retry: 1
         })
+        .create()
         .request({});
 
         pipeCtx.on('response:end', function validateResponse(err, response) {
@@ -874,7 +986,6 @@ describe(__filename, function () {
 
     it('should link two pipes via "use", propagate request, response and do trace', function (done) {
         var order = [];
-        var route = [];
         var pipe1 = Trooba
         .use(function h1_1(pipe) {
             pipe.on('request', function onRequest(request, next) {
@@ -949,9 +1060,14 @@ describe(__filename, function () {
             p: 2
         });
 
-        pipe.tracer(function (message, pipePoint) {
-            route.push(pipePoint.handler.name + (message.flow === 1 ? '-req' : '-res'));
-        }).request({
+        var route = [];
+
+        pipe.create({
+            trace: function (point, message) {
+                route.push(point.handler.name + '-' + (message.flow === 1 ? 'req' : 'res'));
+            }
+        })
+        .request({
             foo: 'bar'
         })
         .on('response', function (response) {
@@ -1044,6 +1160,7 @@ describe(__filename, function () {
         .build({
             p: 2
         })
+        .create()
         .request({
             foo: 'bar'
         })
@@ -1071,11 +1188,12 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('response:data', function (data, next) {
             chunks.push(data);
             next();
         })
-        .on('response:end', function validateResponse() {
+        .once('response:end', function validateResponse() {
             Assert.deepEqual(['data1', 'data2', undefined], chunks);
             done();
         })
@@ -1091,6 +1209,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('error', done)
         .on('response:end', function validateResponse() {
             done();
@@ -1250,7 +1369,7 @@ describe(__filename, function () {
                     };
                 });
             })
-            .build('client');
+            .build().create('client');
 
         function makeRequest(index, next) {
             client.doRequest(index, function (err, response) {
@@ -1282,6 +1401,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('response:end', function () {
             setTimeout(done, 10);
         })
@@ -1296,6 +1416,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .on('response', function () {
             setTimeout(done, 10);
         })
@@ -1317,7 +1438,8 @@ describe(__filename, function () {
         })
         .build({
             foo: 'bar'
-        });
+        })
+        .create();
 
         client.request({}, function (err, response) {
             Assert.equal('bar', response);
@@ -1337,7 +1459,8 @@ describe(__filename, function () {
                 pipe.respond({});
             });
         })
-        .build();
+        .build()
+        .create();
 
         client.request({}, function () {
             Assert.throws(function () {
@@ -1354,7 +1477,8 @@ describe(__filename, function () {
                 pipe.throw(new Error('Bad'));
             });
         })
-        .build();
+        .build()
+        .create();
 
         pipe.request({})
         .once('error', function (err) {
@@ -1378,6 +1502,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .request({})
         .once('error', function (err) {
             Assert.equal('Another bad', err.message);
@@ -1399,6 +1524,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .request('original')
         .once('response', function (response) {
             Assert.equal('replaced', response);
@@ -1421,6 +1547,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .request('original')
         .once('response', function (response) {
             Assert.equal('replaced', response);
@@ -1437,6 +1564,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .once('response', function (response) {
             Object.keys(pipe.context.$points).forEach(function forEach(index) {
                 Assert.deepEqual({}, pipe.context.$points[index]._messageHandlers);
@@ -1467,6 +1595,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .once('response', function (response) {
             Assert.equal('foobar', response);
             Assert.equal(['replace', 'tr'].toString(), order.toString());
@@ -1517,6 +1646,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .once('response', function (response) {
             Assert.deepEqual(['replace', 'shouldNotAffect', 'tr'], order);
             Assert.equal('barfoo', response);
@@ -1562,6 +1692,7 @@ describe(__filename, function () {
             });
         })
         .build()
+        .create()
         .once('response', function (response) {
             Assert.deepEqual(['replace', 'shouldNotAffect', 'tr'], order);
 
@@ -1581,6 +1712,9 @@ describe(__filename, function () {
         var pipe = Trooba.use(function (pipe) {
             var reqData = [];
             Assert.ok(!pipe.context.$requestStream);
+            pipe.on('request', function () {
+                pipe.resume();
+            });
             pipe.on('request:data', function (data, next) {
                 Assert.ok(pipe.context.$requestStream);
                 reqData.push(data);
@@ -1593,16 +1727,17 @@ describe(__filename, function () {
             });
         })
         .build()
-        ;
+        .create();
 
         pipe.streamRequest('request')
             .write('foo')
             .write('bar')
-            .end()
+            .once('error', done)
             .on('response', function (response) {
                 Assert.deepEqual(['foo', 'bar', undefined], response);
                 done();
-            });
+            })
+            .end();
     });
 
     it('should catch only response chunks', function (done) {
@@ -1616,8 +1751,10 @@ describe(__filename, function () {
             });
         })
         .build()
-        .on('response', function (response) {
+        .create()
+        .on('response', function (response, next) {
             Assert.equal('response', response);
+            next();
         });
 
         var reqData = [];
@@ -1642,7 +1779,8 @@ describe(__filename, function () {
                     .end();
             });
         })
-        .build();
+        .build()
+        .create();
 
         var reqData = [];
         pipe.request('request')
@@ -1674,7 +1812,9 @@ describe(__filename, function () {
                     .end();
             });
         })
-        .build().request('request');
+        .build()
+        .create()
+        .request('request');
 
         pipe.once('response:end', function (data) {
             Assert.deepEqual(['request', 'response', 'foo', 'bar', undefined], messages);
@@ -1695,8 +1835,10 @@ describe(__filename, function () {
             });
         })
         .build()
-        .on('response', function (response) {
+        .create()
+        .on('response', function (response, next) {
             Assert.equal('response', response);
+            next(); // resume
         });
 
         var count = 0;
@@ -1729,7 +1871,9 @@ describe(__filename, function () {
         })
         .build({
             retry: 2
-        }).request({
+        })
+        .create()
+        .request({
             order: []
         }, function validateResponse(err, response) {
             Assert.ok(err);
@@ -1750,6 +1894,7 @@ describe(__filename, function () {
         .build({
             retry: 2
         })
+        .create()
         .request({
             order: []
         }, function validateResponse(err, response) {
@@ -1803,7 +1948,7 @@ describe(__filename, function () {
             return tr;
         }
 
-        var client = Trooba.use(factory()).build('api');
+        var client = Trooba.use(factory()).build().create('api');
         Assert.ok(client.hello);
         Assert.ok(client.bye);
         done();
@@ -1848,7 +1993,7 @@ describe(__filename, function () {
             return tr;
         }
 
-        var client = Trooba.use(factory()).build('api');
+        var client = Trooba.use(factory()).build().create('api');
         client.hello('John', function (err, response) {
             Assert.equal('hello John', response);
         });
@@ -1891,7 +2036,7 @@ describe(__filename, function () {
             return tra;
         }
 
-        var client = Trooba.use(factory()).build('api');
+        var client = Trooba.use(factory()).build().create('api');
 
         client.request({
             foo: 'bar'
@@ -1914,7 +2059,8 @@ describe(__filename, function () {
             .use(function foo1(pipe) {
                 order.push('foo1');
             })
-            .build();
+            .build()
+            .create();
 
             Assert.deepEqual([
                 'foo1'
@@ -1926,7 +2072,9 @@ describe(__filename, function () {
                     'foo1-req',
                     'foo1-res',
                     'pipeHead-res'
-                ], list.map(function (p) {return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');}));
+                ], list.map(function (p) {
+                    return p.point.handler.name + (p.flow === 1 ? '-req' : '-res');
+                }));
                 next();
             });
         });
@@ -1939,6 +2087,9 @@ describe(__filename, function () {
                 order.push('bar1');
             })
             .build();
+
+            Assert.deepEqual([], order);
+            pipeBar = pipeBar.create();
 
             Assert.deepEqual([
                 'bar1',
@@ -1964,7 +2115,7 @@ describe(__filename, function () {
         });
 
         it('should trace pipeBar', function (next) {
-            pipeBar.trace(function (err, list) {
+            pipeBar.create().trace(function (err, list) {
                 Assert.deepEqual([
                     'pipeHead-req',
                     'bar1-req',
@@ -1981,7 +2132,7 @@ describe(__filename, function () {
         it('should fail to re-insert pipe where it is already added', function (next) {
             Assert.throws(function () {
                 pipeFoo.next.link(pipeBar);
-            }, /The hook has already been registered, you can use only one hook for specific event type: */);
+            }, /The pipe already has a link/);
             next();
         });
 
@@ -2052,7 +2203,8 @@ describe(__filename, function () {
             .use(function foo3(pipe) {
                 order.push('foo3');
             })
-            .build();
+            .build()
+            .create();
 
             // link to other pipe
             var pipeQaz = Trooba
@@ -2122,7 +2274,7 @@ describe(__filename, function () {
             })
             .build();
 
-            pipeFoo.request({}, function () {
+            pipeFoo.create().request({}, function () {
                 Assert.deepEqual([
                     'foo1',
                     'foo2',
@@ -2162,7 +2314,7 @@ describe(__filename, function () {
             .build();
 
             order = [];
-            pipeBar.request({}, function () {
+            pipeBar.create().request({}, function () {
                 Assert.deepEqual([
                     'bar1',
                     'bar2',
@@ -2234,7 +2386,7 @@ describe(__filename, function () {
             })
             .build();
 
-            pipeFoo.request({}, function () {
+            pipeFoo.create().request({}, function () {
                 Assert.deepEqual([
                     'foo1',
                     'foo2',
@@ -2346,7 +2498,8 @@ describe(__filename, function () {
                     pipe.respond();
                 });
             })
-            .build();
+            .build()
+            .create();
 
             pipeBar = Trooba
             .use(function bar1(pipe) {
@@ -2379,7 +2532,8 @@ describe(__filename, function () {
                     next();
                 });
             })
-            .build();
+            .build()
+            .create();
 
             pipeFoo.next.link(pipeBar);
             order = [];
@@ -2460,7 +2614,7 @@ describe(__filename, function () {
             it('should trace the modified pipe', function (next) {
                 order = [];
 
-                pipeFoo.trace(function (err, list) {
+                pipeFoo.create().trace(function (err, list) {
                     Assert.deepEqual([
                         'pipeHead-req',
                         'foo1-req',
@@ -2489,6 +2643,7 @@ describe(__filename, function () {
                 order = [];
 
                 pipeFoo
+                .create()
                 .request({}, function () {
                     Assert.deepEqual([
                         'foo1',
@@ -2541,7 +2696,8 @@ describe(__filename, function () {
                         pipe.respond();
                     });
                 })
-                .build();
+                .build()
+                .create();
 
                 pipeBar = Trooba
                 .use(function bar1(pipe) {
@@ -2598,6 +2754,318 @@ describe(__filename, function () {
                     next();
                 });
             });
+
+            describe('should join two pipes at request stage and route throuh modified pipe',
+            function () {
+                it('init', function () {
+                    pipeFoo = Trooba
+                    .use(function foo1(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('foo1');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-foo1');
+                            next();
+                        });
+                    })
+                    .use(function foo2(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('foo2');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-foo2');
+                            next();
+                        });
+                    })
+                    .use(function foo3(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('foo3');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-foo3');
+                            next();
+                        });
+                    })
+                    .use(function fooTr(pipe) {
+                        pipe.on('request', function () {
+                            order.push('foo-tr');
+                            pipe.respond();
+                        });
+                    })
+                    .build();
+
+                    pipeBar = Trooba
+                    .use(function bar1(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('bar1');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-bar1');
+                            next();
+                        });
+                    })
+                    .use(function bar2(pipe) {
+                        pipe.on('request', function (r, next) {
+                            order.push('bar2');
+                            next();
+                        });
+                        pipe.on('response', function (r, next) {
+                            order.push('res-bar2');
+                            next();
+                        });
+                    })
+                    .use(function bar3(pipe) {
+                        pipe.on('request', function (r, next, context) {
+                            pipe.link(pipeFoo);
+                            next();
+                        });
+                    })
+                    .build();
+
+                });
+
+                it('link, first time', function (next) {
+
+                    order = [];
+
+                    pipeBar.create().request({}, function () {
+                        Assert.deepEqual([
+                            'bar1',
+                            'bar2',
+                            'foo1',
+                            'foo2',
+                            'foo3',
+                            'foo-tr',
+                            'res-foo3',
+                            'res-foo2',
+                            'res-foo1',
+                            'res-bar2',
+                            'res-bar1'
+                        ], order);
+                        next();
+                    });
+                });
+
+                it('link, second time', function (next) {
+
+                    order = [];
+
+                    pipeBar.create().request({}, function () {
+                        Assert.deepEqual([
+                            'bar1',
+                            'bar2',
+                            'foo1',
+                            'foo2',
+                            'foo3',
+                            'foo-tr',
+                            'res-foo3',
+                            'res-foo2',
+                            'res-foo1',
+                            'res-bar2',
+                            'res-bar1'
+                        ], order);
+                        next();
+                    });
+                });
+
+            });
+
+            describe('should link in parallel without conflict', function () {
+                var mainPipe;
+                var toPipe;
+
+                before(function () {
+                    toPipe = Trooba
+                    .use(function foo1(pipe) {
+                        pipe.on('request', function (r, next) {
+                            r.order.push('foo1' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                        pipe.on('response', function (r, next) {
+                            r.order.push('res-foo1' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .use(function foo2(pipe) {
+                        pipe.on('request', function (r, next) {
+                            r.order.push('foo2' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                        pipe.on('response', function (r, next) {
+                            r.order.push('res-foo2' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .use(function fooTr(pipe) {
+                        pipe.on('request', function (r) {
+                            setTimeout(function () {
+                                r.order.push('foo-tr' + '-' + r.index);
+                                pipe.respond(r);
+                            }, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .build();
+
+                    mainPipe = Trooba
+                    .use(function bar1(pipe) {
+                        pipe.on('request', function (r, next) {
+                            r.order.push('bar1' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                        pipe.on('response', function (r, next) {
+                            r.order.push('res-bar1' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .use(function bar2(pipe) {
+                        pipe.on('request', function (r, next) {
+                            r.order.push('bar2' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                        pipe.on('response', function (r, next) {
+                            r.order.push('res-bar2' + '-' + r.index);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .use(function bar3(pipe) {
+                        pipe.on('request', function (r, next, context) {
+                            pipe.link(toPipe);
+                            setTimeout(next, Math.round(Math.random() * 50));
+                        });
+                    })
+                    .build();
+                });
+
+                it('test', function (next) {
+                    var count = 0;
+                    var RUNS = 1000;
+                    function oneRequest(index, next) {
+                        mainPipe.create().request({
+                            order: [],
+                            index: index
+                        }, function (err, r) {
+                            count++;
+                            Assert.deepEqual([
+                                'bar1-' + index,
+                                'bar2-' + index,
+                                'foo1-' + index,
+                                'foo2-' + index,
+                                'foo-tr-' + index,
+                                'res-foo2-' + index,
+                                'res-foo1-' + index,
+                                'res-bar2-' + index,
+                                'res-bar1-' + index
+                            ], r.order);
+                            next();
+                        });
+                    }
+
+                    Async.times(RUNS, oneRequest, function () {
+                        Assert.equal(RUNS, count);
+                        next();
+                    });
+                });
+
+            });
+
+            it('should join two pipes at sync message and route to new pipe', function (next) {
+                var mainPipe = Trooba
+                .use(function foo1(pipe) {
+                    pipe.on('custom', function (r, next) {
+                        order.push('foo1');
+                        pipe.link(toPipe);
+                        next();
+                    });
+                })
+                .use(function foo2(pipe) {
+                    pipe.on('custom', function (r) {
+                        order.push('foo2');
+                        pipe.respond();
+                    });
+                })
+                .build()
+                .create();
+
+                var toPipe = Trooba
+                .use(function bar1(pipe) {
+                    pipe.on('custom', function (r, next) {
+                        order.push('bar1');
+                        next();
+                    });
+                })
+                .use(function bar2(pipe) {
+                    pipe.on('custom', function (r, next) {
+                        order.push('bar2');
+                        next();
+                    });
+                })
+                .build();
+
+
+                order = [];
+
+                mainPipe
+                .on('response', function () {
+                    Assert.deepEqual([
+                        'foo1',
+                        'bar1',
+                        'bar2',
+                        'foo2'
+                    ], order);
+                    next();
+                })
+                .send({
+                    type: 'custom',
+                    flow: 1
+                });
+            });
+
+            it('should join two pipes at the time of tracing', function (next) {
+                var mainPipe = Trooba
+                .use(function foo1(pipe) {
+                    pipe.once('trace', function (t, next) {
+                        pipe.link(toPipe);
+                        next();
+                    });
+                })
+                .use(function foo2(pipe) {
+
+                })
+                .build();
+
+                var toPipe = Trooba
+                .use(function bar1(pipe) {
+                })
+                .use(function bar2(pipe) {
+                })
+                .build();
+
+
+                mainPipe
+                .create()
+                .trace(function (err, list) {
+                    var order = list.map(function (item) {
+                        return item.point.handler.name;
+                    });
+                    Assert.deepEqual([
+                        'pipeHead',
+                        'foo1',
+                        'bar1',
+                        'bar2',
+                        'foo2',
+                        'foo2',
+                        'bar2',
+                        'bar1',
+                        'foo1',
+                        'pipeHead'
+                    ], order);
+                    next();
+                });
+            });
         });
 
     });
@@ -2610,7 +3078,7 @@ describe(__filename, function () {
                 console.log = _log;
             });
 
-            it('should drop message int console', function (done) {
+            it('should drop message into console', function (done) {
                 console.log = function intercept(msg, type, flow) {
                     _log.apply(console, arguments);
                     if (msg === 'The message has been dropped, ttl expired:') {
@@ -2638,7 +3106,10 @@ describe(__filename, function () {
                         });
                     });
                 })
-                .build()
+                .build({
+                    ttl: 2
+                })
+                .create()
                 .trace();
             });
 
@@ -2671,6 +3142,9 @@ describe(__filename, function () {
                         done();
                     }
                 })
+                .create({
+                    ttl: 2
+                })
                 .trace();
             });
         });
@@ -2678,7 +3152,7 @@ describe(__filename, function () {
     });
 
     it('should access default next and prev without context', function () {
-        var pipe = Trooba.use(function (pipe) {}).build();
+        var pipe = Trooba.use(function (pipe) {}).build().create();
         var nextPoint = pipe.next;
         Assert.ok(pipe.next);
         Assert.ok(nextPoint === pipe.next);
@@ -2691,7 +3165,7 @@ describe(__filename, function () {
         // build a pipe with prev
         pipe = Trooba.use(function prev(pipe) {
         }).use(function (pipe) {
-        }).build();
+        }).build().create();
 
         nextPoint = pipe.next;
         var prevPoint = pipe.next.prev;
@@ -2709,4 +3183,1050 @@ describe(__filename, function () {
         Assert.ok(pipe.next.prev);
         Assert.ok(prevPoint !== pipe.next.prev);
     });
+
+    describe('order', function () {
+        it('should keep order between request and chunks, short pipe', function (done) {
+            var pipe = new Trooba()
+            .use(function h3(pipe) {
+                var order = [];
+                pipe.on('request', function (request) {
+                    setTimeout(function () {
+                        order.push(request);
+                        pipe.resume();
+                    }, 50);
+                });
+                pipe.on('request:data', function (data) {
+                    if (!data) {
+                        Assert.deepEqual([
+                            'r1', 'd1', 'd2'
+                        ], order);
+                        done();
+                        return;
+                    }
+                    order.push(data);
+                    pipe.resume();
+                });
+            })
+            .build();
+
+            pipe.create().streamRequest('r1')
+                .write('d1')
+                .write('d2')
+                .end();
+        });
+
+        it('should handle mutiple resume by mistake', function (done) {
+            var pipe = new Trooba()
+            .use(function h(pipe) {
+                var order = [];
+                pipe.on('request', function (request) {
+                    setTimeout(function () {
+                        order.push(request);
+                        pipe.respond();
+                        pipe.respond();
+                        pipe.resume();
+                        pipe.resume();
+                    }, 50);
+                });
+                pipe.on('request:data', function (data) {
+                    if (!data) {
+                        Assert.deepEqual([
+                            'r1', 'd1', 'd2'
+                        ], order);
+                        done();
+                        return;
+                    }
+                    order.push(data);
+                    pipe.resume();
+                });
+            })
+            .build();
+
+            pipe.create().streamRequest('r1')
+                .write('d1')
+                .write('d2')
+                .end();
+        });
+
+        it('should keep order between request and chunks', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('request', function (request, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 50);
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 50);
+                });
+            })
+            .use(function h3(pipe) {
+                var order = [];
+                pipe.on('request', function (request) {
+                    order.push(request);
+                    pipe.resume();
+                });
+                pipe.on('request:data', function (data) {
+                    if (!data) {
+                        Assert.deepEqual([
+                            'r1', 'd1', 'd2'
+                        ], order);
+                        done();
+                        return;
+                    }
+                    order.push(data);
+                    pipe.resume();
+                });
+            })
+            .build();
+
+            pipe.create().streamRequest('r1')
+                .write('d1')
+                .write('d2')
+                .end();
+        });
+
+        it('should keep order between response and chunks', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('response', function (response, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    pipe.streamResponse('r1')
+                        .write('d1')
+                        .write('d2')
+                        .end();
+                });
+
+            })
+            .build();
+
+            var order = [];
+
+            pipe.create().request()
+                .on('response', function (response, next) {
+                    order.push(response);
+                    next();
+                })
+                .on('response:data', function (data, next) {
+                    if (data) {
+                        order.push(data);
+                    }
+                    else {
+                        Assert.deepEqual([
+                            'r1', 'd1', 'd2'
+                        ], order);
+                        done();
+                    }
+                    next();
+                });
+
+        });
+
+        it('should keep order between response and chunks, partial requestStream', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('response', function (response, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    pipe.streamResponse('r1')
+                        .write('d1')
+                        .write('d2')
+                        .end();
+                });
+
+            })
+            .build();
+
+            var order = [];
+
+            pipe.create().streamRequest('r1')
+                .on('response', function (response, next) {
+                    order.push(response);
+                    next();
+                })
+                .on('response:data', function (data, next) {
+                    if (data) {
+                        order.push(data);
+                    }
+                    else {
+                        Assert.deepEqual([
+                            'r1', 'd1', 'd2'
+                        ], order);
+                        done();
+                    }
+                    next();
+                });
+                // no end or write stream used
+
+        });
+
+        it('should keep order between request and its chunks and response and its chunks, echo mode', function (done) {
+            var pipe = new Trooba()
+            .use(function hdata(pipe) {
+                var reqCount = 0;
+                var resCount = 0;
+                pipe.on('request:data', function (request, next) {
+                    if (reqCount++ > 0) {
+                        return next();
+                    }
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+                pipe.on('response:data', function (data, next) {
+                    if (resCount++ > 0) {
+                        return next();
+                    }
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h1(pipe) {
+                pipe.on('request', function (request, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request) {
+                    stream = pipe.streamResponse(request);
+                });
+                pipe.on('request:data', function (data) {
+                    stream.write(data);
+                });
+            })
+            .build();
+
+            var order = [];
+
+            pipe.create().streamRequest('r1')
+                .write('d1')
+                .write('d2')
+                .end()
+                .on('response', function (response, next) {
+                    order.push(response);
+                    next();
+                })
+                .on('response:data', function (data, next) {
+                    if (data) {
+                        order.push(data);
+                    }
+                    else {
+                        Assert.deepEqual([
+                            'r1', 'd1', 'd2'
+                        ], order);
+                        done();
+                    }
+                    next();
+                });
+        });
+
+        it('should keep order between request and its chunks and response and its chunks, echo mode, parallel execution', function (done) {
+            var pipe = new Trooba()
+            .use(function hdata(pipe) {
+                var reqCount = 0;
+                var resCount = 0;
+                pipe.on('request:data', function (request, next) {
+                    if (reqCount++ > 0) {
+                        return next();
+                    }
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+                pipe.on('response:data', function (data, next) {
+                    if (resCount++ > 0) {
+                        return next();
+                    }
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h1(pipe) {
+                pipe.on('request', function (request, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request) {
+                    stream = pipe.streamResponse(request);
+                });
+                pipe.on('request:data', function (data) {
+                    stream.write(data);
+                });
+            })
+            .build();
+
+            var count = 0;
+            var MAX = 1000;
+
+            function doRequest(n, done) {
+                var order = [];
+                pipe.create().streamRequest('r1_' + n)
+                    .write('d1_' + n)
+                    .write('d2_' + n)
+                    .end()
+                    .on('response', function (response, next) {
+                        order.push(response);
+                        next();
+                    })
+                    .on('response:data', function (data, next) {
+                        if (data) {
+                            order.push(data);
+                        }
+                        else {
+                            Assert.deepEqual([
+                                'r1_' + n, 'd1_' + n, 'd2_' + n
+                            ], order);
+                            count++;
+                            done();
+                        }
+                        next();
+                    });
+            }
+
+            Async.times(MAX, doRequest, function () {
+                Assert.equal(MAX, count);
+                done();
+            });
+
+        });
+
+        it('should not block single response flow when request stream flow is paused', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('request:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    setTimeout(function () {
+                        pipe.respond(Date.now());
+                    }, 0);
+                });
+            })
+            .build();
+
+            pipe.create()
+            .streamRequest('r1')
+            .on('response', function (response, next) {
+                var total = Date.now() - response;
+                Assert.ok(total < 20, 'Actual time: ' + total);
+                done();
+            })
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should block response stream flow when request stream flow is paused', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('request:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 50);
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    setTimeout(function () {
+                        pipe.streamResponse(Date.now());
+                    }, 0);
+                });
+            })
+            .build();
+
+            pipe.create()
+            .streamRequest('r1')
+            .on('response', function (response, next) {
+                var total = Date.now() - response;
+                Assert.ok(total > 100, 'Actual time: ' + total);
+                done();
+            })
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should get response', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('request:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    pipe.respond('r1');
+                });
+            })
+            .build();
+
+            pipe.create()
+            .streamRequest('r1')
+            .on('response', function (response, next) {
+                Assert.equal('r1', response);
+                done();
+            })
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should block request flow when response fow is blocked', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('response:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 100);
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    var stream = pipe.streamResponse('r1');
+                    stream.end();
+                });
+                pipe.on('request:data', function (data) {
+                    if (data) {
+                        var total = Date.now() - data;
+                        Assert.ok(total > 60, 'Actual time: ' + total);
+                        done();
+                    }
+                });
+            })
+            .build();
+
+            var stream = pipe.create()
+            .streamRequest('r1');
+
+            setTimeout(function () {
+                stream
+                .write(Date.now())
+                .end();
+            }, 20);
+        });
+
+        it('should not resume request flow when pipe.throw is called', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('request:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 20);
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function () {
+                    pipe.throw(new Error('Test error'));
+                });
+                pipe.on('request:data', function (data, next) {
+                    done(new Error('Should not happen'));
+                });
+            })
+            .build();
+
+            pipe.create()
+            .streamRequest('r1')
+            .on('response', function (response, next) {
+                done(new Error('Should not happen'));
+            })
+            .on('error', function (err) {
+                setTimeout(done, 40);
+            })
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should resume request flow when next() is called', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                var count = 0;
+                pipe.on('request:data', function (data, next) {
+                    if (count++ > 0) {
+                        return next();
+                    }
+                    setTimeout(function delay() {
+                        next();
+                    }, 20);
+                });
+            })
+            .use(function h2(pipe) {
+                var order = [];
+                pipe.on('request:data', function (data, next) {
+                    if (data) {
+                        order.push(data);
+                        next();
+                        return;
+                    }
+                    Assert.deepEqual(['d1', 'd2'], order) ;
+                    done();
+                });
+            })
+            .build();
+
+            pipe.create()
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should resume request flow when pipe.resume() is called', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                var count = 0;
+                pipe.on('request:data', function (data, next) {
+                    if (count++ > 0) {
+                        return next();
+                    }
+                    setTimeout(function delay() {
+                        pipe.resume();
+                    }, 20);
+                });
+            })
+            .use(function h2(pipe) {
+                var order = [];
+                pipe.on('request:data', function (data, next) {
+                    if (data) {
+                        order.push(data);
+                        next();
+                        return;
+                    }
+                    Assert.deepEqual(['d2'], order) ;
+                    done();
+                });
+            })
+            .build();
+
+            pipe.create()
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should not resume response flow when pipe.throw is called', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('response:data', function (data, next) {
+                    setTimeout(function delay() {
+                        pipe.throw(new Error('Test error'));
+                    }, 50);
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request) {
+                    stream = pipe.streamResponse(request);
+                });
+                pipe.on('request:data', function (data, next) {
+                    stream.write(data);
+                });
+            })
+            .build();
+
+            pipe.create()
+            .on('error', function () {
+                setTimeout(done, 100);
+            })
+            .on('response:data', function () {
+                done(new Error('Should not happen'));
+            })
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should resume response flow when next() is called', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('response:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 10);
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request) {
+                    stream = pipe.streamResponse(request);
+                });
+                pipe.on('request:data', function (data, next) {
+                    stream.write(data);
+                });
+            })
+            .build();
+
+            var order = [];
+            pipe.create()
+            .on('response:data', function (data, next) {
+                if (data) {
+                    order.push(data);
+                    return next();
+                }
+                Assert.deepEqual(['d1', 'd2'], order);
+                done();
+            })
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should resume response flow when pipe.resume() is called', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                var count = 0;
+                pipe.on('response:data', function (data, next) {
+                    if (count++ > 0) {
+                        return next();
+                    }
+                    setTimeout(function delay() {
+                        pipe.resume();
+                    }, 10);
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request) {
+                    stream = pipe.streamResponse(request);
+                });
+                pipe.on('request:data', function (data, next) {
+                    stream.write(data);
+                });
+            })
+            .build();
+
+            var order = [];
+            pipe.create()
+            .on('response:data', function (data, next) {
+                if (data) {
+                    order.push(data);
+                    return next();
+                }
+                Assert.deepEqual(['d2'], order);
+                done();
+            })
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end();
+
+        });
+
+        it('should resume response flow when message is dropped', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                var count = 0;
+                pipe.on('response:data', function (data, next) {
+                    if (count++ === 1) {
+                        return setTimeout(function delay() {
+                            next();
+                        }, 50);
+                    }
+                    next();
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request) {
+                    stream = pipe.streamResponse(request);
+                });
+                pipe.on('request:data', function (data) {
+                    if (data) {
+                        stream.write(data);
+                    }
+                    else {
+                        setTimeout(function () {
+                            stream.write(data);
+                        }, 60);
+                    }
+                });
+            })
+            .build({
+                ttl: 30
+            });
+
+            var order = [];
+            pipe.create()
+            .on('response:data', function (data, next) {
+                if (data) {
+                    order.push(data);
+                    return next();
+                }
+                Assert.deepEqual(['d1'], order);
+                done();
+            })
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end();
+
+        });
+
+        it('should resume request flow when message in process is dropped', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                var count = 0;
+                pipe.on('request:data', function (data, next) {
+                    if (count++ === 1) {
+                        return setTimeout(function delay() {
+                            next();
+                        }, 50);
+                    }
+                    next();
+                });
+            })
+            .use(function h2(pipe) {
+                var order = [];
+                pipe.on('request:data', function (data, next) {
+                    if (data) {
+                        order.push(data);
+                        next();
+                    }
+                    else {
+                        Assert.deepEqual(['d1'], order);
+                        done();
+                    }
+                });
+            })
+            .build({
+                ttl: 30
+            });
+
+            var stream = pipe.create()
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2');
+            setTimeout(function () {
+                stream.end();
+            }, 60);
+
+        });
+
+        it('should allow other messages when paused in request flow', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                var count = 0;
+                pipe.on('request:data', function (data, next) {
+                    if (count++ === 1) {
+                        return setTimeout(function delay() {
+                            next();
+                        }, 50);
+                    }
+                    next();
+                });
+            })
+            .use(function h2(pipe) {
+                var order = [];
+                pipe.on('foo', function (data) {
+                    order.push(data);
+                });
+
+                pipe.on('request:data', function (data, next) {
+                    if (data) {
+                        order.push(data);
+                        next();
+                    }
+                    else {
+                        Assert.deepEqual(['d1', 'foo', 'bar', 'd2'], order);
+                        done();
+                    }
+                });
+            })
+            .build();
+
+            var client = pipe.create();
+            var stream = client.streamRequest('r1')
+            .write('d1')
+            .write('d2');
+            stream.end();
+            setTimeout(function () {
+                client.send({
+                    type: 'foo',
+                    ref: 'foo',
+                    flow: 1
+                });
+            }, 10);
+            setTimeout(function () {
+                client.send({
+                    type: 'foo',
+                    ref: 'bar',
+                    flow: 1
+                });
+            }, 15);
+
+        });
+
+        it('should allow other messages when paused in response flow', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                var count = 0;
+                pipe.on('response:data', function (data, next) {
+                    if (count++ === 1) {
+                        return setTimeout(function delay() {
+                            next();
+                        }, 50);
+                    }
+                    next();
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request, next) {
+                    stream = pipe.streamResponse(request);
+                    next();
+
+                    setTimeout(function () {
+                        pipe.send({
+                            type: 'foo',
+                            ref: 'foo',
+                            flow: 2
+                        });
+                    }, 10);
+                    setTimeout(function () {
+                        pipe.send({
+                            type: 'foo',
+                            ref: 'bar',
+                            flow: 2
+                        });
+                    }, 15);
+                });
+
+                pipe.on('request:data', function (data) {
+                    stream.write(data);
+                });
+            })
+            .build();
+
+            var order = [];
+
+            var client = pipe.create();
+            client.streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end()
+            .on('response:data', function (data, next) {
+                if (data) {
+                    order.push(data);
+                    return next();
+                }
+                Assert.deepEqual(['d1', 'foo', 'bar', 'd2'], order);
+                done();
+            })
+            .on('foo', function (data) {
+                order.push(data);
+            });
+
+        });
+
+        it('should call resume with empty queue', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('request', function (data, next) {
+                    pipe.resume();
+                    pipe.resume();
+                    pipe.resume();
+                    pipe.resume();
+                    next();
+                });
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    Assert.equal('r1', request);
+                    done();
+                });
+            })
+            .build();
+
+            pipe.create()
+            .request('r1');
+
+        });
+
+        it('should call resume with empty context', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.resume();
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    Assert.equal('r1', request);
+                    done();
+                });
+            })
+            .build();
+
+            pipe.create()
+            .request('r1');
+        });
+
+        it('should call resume with no context', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.context = null;
+                pipe.resume();
+            })
+            .use(function h2(pipe) {
+                pipe.on('request', function (request) {
+                    Assert.equal('r1', request);
+                    done();
+                });
+            })
+            .build();
+
+            pipe.create()
+            .request('r1');
+
+        });
+
+        it('should trace pipe points, return state of each point with queue length in each', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.on('response:data', function (data, next) {
+                    setTimeout(function delay() {
+                        next();
+                    }, 50);
+                });
+            })
+            .use(function h2(pipe) {
+                var stream;
+                pipe.on('request', function (request, next) {
+                    stream = pipe.streamResponse(request);
+                    next();
+
+                    setTimeout(function () {
+                        pipe.send({
+                            type: 'foo',
+                            ref: 'foo',
+                            flow: 2
+                        });
+                    }, 10);
+                    setTimeout(function () {
+                        pipe.send({
+                            type: 'foo',
+                            ref: 'bar',
+                            flow: 2
+                        });
+                    }, 15);
+                });
+
+                pipe.on('request:data', function (data) {
+                    stream.write(data);
+                });
+            })
+            .build();
+
+            var order = [];
+
+            var client = pipe.create();
+            client.streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end()
+            .on('response:data', function (data, next) {
+                if (data) {
+                    order.push(data);
+                    return next();
+                }
+                Assert.deepEqual(['foo', 'bar', 'd1', 'd2'], order);
+
+            })
+            .on('foo', function (data) {
+                order.push(data);
+            });
+
+            setTimeout(function () {
+                client.trace(function (err, list) {
+
+                    var route = list.map(function (item) {
+                        var point = item.point;
+                        return point.handler.name + '(' + point.queue().size() + ')';
+                    });
+                    Assert.deepEqual([
+                        'pipeHead(0)', 'h1(3)', 'h2(0)', 'h2(0)', 'h1(3)', 'pipeHead(0)'
+                    ], route);
+                    done();
+                });
+            }, 20);
+        });
+
+        it('should detect broken pipe', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.once('request:data', function (data, next) {
+                    // brake the pipe
+                    pipe.queue().getQueue().pop();
+                    Assert.throws(function () {
+                        next();
+                    }, /The queue for h1-\d+ is broken/);
+                    done();
+                });
+            })
+            .build();
+
+            pipe.create()
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should get tail from head', function () {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {})
+            .build();
+
+            Assert.ok(pipe !== pipe.tail);
+
+            pipe = new Trooba()
+            .build();
+
+            Assert.ok(pipe === pipe.tail);
+
+            // now without context
+            pipe.context = undefined;
+            Assert.ok(pipe === pipe.tail);
+        });
+
+    });
+
+    it('should not find request API', function () {
+        var pipe = new Trooba();
+        Assert.throws(function () {
+            pipe.build().create('unknown API');
+        }, /Cannot find requested API: unknown API/);
+    });
+
 });

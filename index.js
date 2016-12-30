@@ -1,6 +1,11 @@
 'use strict';
 
-var TTL = 1000;
+var TTL = Infinity;
+
+var defer = process && process.nextTick && process.nextTick.bind(process) ||
+    setImmediate || function defer(fn) {
+        setTimeout(fn, 0); // this is much slower then setImmediate or nextTick
+    };
 
 /**
  * Assigns transport to the client pipeline
@@ -32,26 +37,32 @@ Trooba.prototype = {
         return this;
     },
 
-    build: function build$(context, interfaceName) {
-        if (typeof arguments[0] === 'string') {
-            interfaceName = arguments[0];
-            context = undefined;
-        }
+    build: function build$(context) {
         var pipe = this._pipe;
-        if (!pipe) {
+        if (!pipe || context) {
             var handlers = this._handlers.slice();
             handlers.unshift(function pipeHead() {});
             pipe = this._pipe = buildPipe(handlers);
         }
 
-        pipe = pipe.create(context || {});
-        var factory = interfaceName && pipe.get(interfaceName);
-        if (interfaceName && !factory) {
-            throw new Error('Cannot find factory for ' + interfaceName);
-        }
-        return interfaceName ? factory(pipe) : pipe;
+        // remove non-persistent context data if any
+        context = Object.keys(context || {}).reduce(function reduce(memo, name) {
+            if (name.charAt(0) !== '$') {
+                memo[name] = context[name];
+            }
+            return memo;
+        }, {
+            validate: {
+                request: false // always validate request by default, not now TODO: set to true
+            }
+        });
+
+        pipe.context = context;
+        return pipe;
     }
 };
+
+module.exports = Trooba;
 
 module.exports.use = function createWithHandler(handler, config) {
     var trooba = new Trooba();
@@ -117,12 +128,9 @@ module.exports.onDrop = function onDrop(message) {
 
 PipePoint.prototype = {
     send: function send$(message) {
-        message.ttl = message.ttl !== undefined ? message.ttl :
-            (Date.now() + (this.config && this.config.ttl || TTL));
-        if (message.ttl < Date.now()) {
-            // onDrop message and let user know
-            (this.context && this.context.onDrop || module.exports.onDrop)(message);
-            return;
+        message.context = message.context || this.context;
+        if (!message.context || !message.context.$inited) {
+            throw new Error('The context has not been initialized, make sure you use pipe.create()');
         }
 
         // pick the direction
@@ -133,26 +141,36 @@ PipePoint.prototype = {
         else {
             nextPoint = message.flow === Types.REQUEST ? this._next$ : this._prev$;
             message.stage = Stages.TRANSIT;
+            // unbound message from this point if any
+            if (message.order && this._id === message.pointId) {
+                this.queue().done(message);
+            }
+        }
+        // drop message if needed
+        message.ttl = message.ttl !== undefined ? message.ttl :
+            (Date.now() + (this.context && this.context.ttl || TTL));
+        if (message.ttl < Date.now()) {
+            // onDrop message and let user know
+            (this.context && this.context.onDrop || module.exports.onDrop)(message);
+            return;
         }
 
         if (nextPoint) {
-            message.context = message.context || this.context;
-            if (!message.context) {
-                throw new Error('Context is missing, make sure context() is used first');
-            }
             // forward message down the pipe
             nextPoint.process(message);
         }
         else if (message.type === 'error') {
             throw message.ref;
         }
-        else if (message.context && message.context.$strict &&
-            message.context.$strict.indexOf(message.type) !== -1) {
+        else if (message.context &&
+            message.context.validate &&
+            message.context.validate[message.type]) {
+
             this.copy(message.context).throw(new Error('No target consumer found for the ' +
                 message.type + ' ' + JSON.stringify(message.ref)));
         }
         else if (message.type === 'trace' && message.flow === Types.REQUEST) {
-            message.flow = Types.RESPONSE;
+            message.flow = Types.RESPONSE; // reverse the route
             this.process(message);
         }
 
@@ -169,14 +187,8 @@ PipePoint.prototype = {
         ret.config = this.config;
         ret.handler = this.handler;
         ret.context = context;
-        ret._points();
+        ret._pointCtx();
         return ret;
-    },
-
-    tracer: function tracer$(tracer) {
-        this.context.trace = true;
-        this.context.tracer$ = tracer;
-        return this;
     },
 
     set: function set$(name, value) {
@@ -190,6 +202,11 @@ PipePoint.prototype = {
 
     link: function link$(pipe) {
         var self = this;
+        if (this._pointCtx().$linked) {
+            throw new Error('The pipe already has a link');
+        }
+        // allow detection of link action
+        this._pointCtx().$linked = true;
         pipe = pipe.create(this.context);
         this.on('$link$', function onStart(message) {
             if (message.flow === Types.REQUEST) {
@@ -216,29 +233,41 @@ PipePoint.prototype = {
     trace: function trace$(callback) {
         var self = this;
         callback = callback || console.log;
+        var route = [{
+            point: this,
+            flow: Types.REQUEST
+        }];
         this.once('trace', function (list) {
             self.removeListener('error');
-            callback(null, list);
+            callback(null, route);
         });
         this.once('error', callback);
 
         this.send({
             type: 'trace',
             flow: Types.REQUEST,
-            ref: [{
-                point: this,
-                flow: Types.REQUEST
-            }]
+            trace: function trace(point, message) {
+                route.push({
+                    point: point,
+                    flow: message.flow,
+                    stage: message.stage
+                });
+            }
         });
+    },
+
+    resume: function resume() {
+        var queue = this.queue();
+        queue && queue.resume();
     },
 
     process: function process$(message) {
         var point = this;
-        var messageHandlers;
 
         // get the hooks
-        messageHandlers = this.handlers(message.context);
+        var messageHandlers = this.handlers(message.context);
 
+        // handle linked pipes first
         var processMessage = messageHandlers.$link$;
         if (processMessage) {
             // for request flow first process through regular hooks if any
@@ -251,7 +280,7 @@ PipePoint.prototype = {
                 // make sure the next cycle happens in this point
                 message.stage = Stages.PROCESS;
             }
-            if (message.flow === Types.RESPONSE) {
+            else if (message.flow === Types.RESPONSE) {
                 // in response flow it should first go throuh the linked pipe
                 if (message.stage === Stages.TRANSIT) {
                     return processMessage(message);
@@ -261,30 +290,32 @@ PipePoint.prototype = {
             }
         }
 
-        if (message.context.trace && message.context.tracer$) {
-            message.context.tracer$(message, point);
+        if (message.context.trace || message.type === 'trace') {
+            var traceFn = message.context.trace || message.trace;
+            if (typeof traceFn === 'function') {
+                traceFn(this._pointCtx(message.context).ref, message);
+            }
         }
 
-        if (message.type === 'trace') {
-            message.ref.push({
-                point: this,
-                flow: message.flow,
-                stage: message.stage
-            });
+        if (point.queue().size(message.context) > 0 &&
+                queueAndIfQueued(message)) {
+            return;
         }
 
         var anyType;
         processMessage = messageHandlers[message.type];
         if (!processMessage) {
-                processMessage = messageHandlers['*'];
-                anyType = true;
+            processMessage = messageHandlers['*'];
+            anyType = true;
         }
+
         if (processMessage) {
+            queueAndIfQueued(message);
             // if sync delivery, than no callback needed before propagation further
             processMessage(anyType ? message : message.ref,
                     message.sync ? undefined : onComplete);
             if (!message.sync) {
-                // on complete would continued the flow
+                // onComplete would continued the flow
                 return;
             }
         }
@@ -292,7 +323,15 @@ PipePoint.prototype = {
             return;
         }
 
-        point.send(message);
+        sendMessage(message);
+
+        function sendMessage(message) {
+            // if link action happend, route to a newly formed route
+            if (message.flow === Types.REQUEST && point._pointCtx(message.context).$linked) {
+                message.stage = message.stage === Stages.TRANSIT ? Stages.PROCESS : message.stage;
+            }
+            point.send(message);
+        }
 
         function onComplete(ref) {
             if (arguments.length) {
@@ -303,7 +342,7 @@ PipePoint.prototype = {
                 return;
             }
 
-            point.send(message);
+            sendMessage(message);
         }
 
         function processEndEvent() {
@@ -320,6 +359,13 @@ PipePoint.prototype = {
                 }
             }
         }
+
+        function queueAndIfQueued(message) {
+            // keep the order for ordered class of messages
+            // if point is in process of similar message, the point is paused
+            // for the given message till the processing is done
+            return message.order && point.queue().add(message);
+        }
     },
 
     /*
@@ -328,7 +374,12 @@ PipePoint.prototype = {
     * to allow them to hook to events they are interested in
     * The context will be attached to every message and bound to pipe
     */
-    create: function create$(context) {
+    create: function create$(context, interfaceName) {
+        if (typeof arguments[0] === 'string') {
+            interfaceName = arguments[0];
+            context = undefined;
+        }
+
         context = context || {};
 
         if (this.context) {
@@ -347,14 +398,20 @@ PipePoint.prototype = {
         var current = head;
         while(current) {
             current.handler(current, current.config);
-            var next = current._next$;
-            if (next) {
-                next = next.copy(context);
-            }
-            current = next;
+            current = current._next$ ?
+                current._next$.copy(context) : undefined;
+        }
+        context.$inited = true;
+
+        if (!interfaceName) {
+            return head;
         }
 
-        return head;
+        var api = head.get(interfaceName);
+        if (!api) {
+            throw new Error('Cannot find requested API: ' + interfaceName);
+        }
+        return api(head);
     },
 
     throw: function throw$(err) {
@@ -365,6 +422,17 @@ PipePoint.prototype = {
         });
     },
 
+    _exposePipeHooks: function exposePipeHooks(point, stream) {
+        stream.on = function onHook(type, handler) {
+            point.on(type, handler);
+            return stream;
+        };
+        stream.once = function onHook(type, handler) {
+            point.once(type, handler);
+            return stream;
+        };
+    },
+
     streamRequest: function streamRequest$(request) {
         this.context.$requestStream = true;
         var point = this.request(request);
@@ -372,53 +440,65 @@ PipePoint.prototype = {
             channel: point,
             flow: Types.REQUEST
         });
-        writeStream.on = function onHook(type, handler) {
-            point.on(type, handler);
-            return writeStream;
-        };
-        writeStream.once = function onHook(type, handler) {
-            point.once(type, handler);
-            return writeStream;
-        };
+
+        this._exposePipeHooks(point, writeStream);
         point.context.$requestStream = writeStream;
         return writeStream;
     },
 
     request: function request$(request, callback) {
         var point = this;
-        if (!point.context) {
-            // create default context
-            point = point.create({});
-        }
+        this.resume();
 
         function sendRequest() {
-            point.send({
+            var msg = {
                 type: 'request',
                 flow: Types.REQUEST,
                 ref: request
-            });
+            };
+            if (point.context.$requestStream) {
+                msg.order = true; // order only streams
+            }
+            point.send(msg);
         }
 
         if (callback) {
             point
             .on('error', function (err) { callback(err); })
-            .on('response', function (res) { callback(null, res); });
+            .on('response', function (res) {
+                point.resume();
+                callback(null, res);
+            });
 
             sendRequest();
             return point;
         }
 
-        this.context.$requestStream ? sendRequest() : setTimeout(sendRequest, 0);
+        // this.context.$requestStream ? sendRequest() : defer(sendRequest, 0);
+        defer(sendRequest);
 
         return point;
     },
 
     respond: function respond$(response) {
-        this.send({
-            type: 'response',
-            flow: Types.RESPONSE,
-            ref: response
-        });
+        var point = this;
+        this.resume();
+
+        function sendResponse() {
+            var msg = {
+                type: 'response',
+                flow: Types.RESPONSE,
+                ref: response
+            };
+
+            if (point.context.$responseStream) {
+                msg.order = true;
+            }
+
+            point.send(msg);
+        }
+
+        defer(sendResponse);
 
         return this;
     },
@@ -427,10 +507,12 @@ PipePoint.prototype = {
         this.context.$responseStream = true;
         var point = this.respond(response);
 
-        return this.context.$responseStream = createWriteStream({
+        var steram = this.context.$responseStream = createWriteStream({
             channel: point,
             flow: Types.RESPONSE
         });
+        this._exposePipeHooks(point, steram);
+        return steram;
     },
 
     /*
@@ -459,22 +541,24 @@ PipePoint.prototype = {
         delete this.handlers()[type];
     },
 
-    _points: function _points$(ctx) {
+    _pointCtx: function _pointCtx$(ctx) {
         ctx = ctx || this.context;
         if (!ctx) {
             throw new Error('Context is missing, please make sure context() is used first');
         }
-        ctx = ctx.$points = ctx.$points || {};
-        ctx = ctx[this._id] = ctx[this._id] || {
+        ctx.$points = ctx.$points || {};
+        return ctx.$points[this._id] = ctx.$points[this._id] || {
             ref: this
         };
-        return ctx;
     },
 
     handlers: function handlers$(ctx) {
-        ctx = this._points(ctx);
-        ctx._messageHandlers = ctx._messageHandlers || {};
-        return ctx._messageHandlers;
+        var pointCtx = this._pointCtx(ctx);
+        return pointCtx._messageHandlers = pointCtx._messageHandlers || {};
+    },
+
+    queue: function queue$() {
+        return this._queue = this._queue || new Queue(this);
     }
 };
 
@@ -499,7 +583,7 @@ Object.defineProperty(PipePoint.prototype, 'prev', {
 Object.defineProperty(PipePoint.prototype, 'tail', {
     get: function getTail() {
         if (this.context && this._tail$) {
-            return this._tail$._points(this.context).ref;
+            return this._tail$._pointCtx(this.context).ref;
         }
         return this._tail$;
     }
@@ -517,15 +601,22 @@ function createWriteStream(ctx) {
         if (data === undefined) {
             ctx.channel._streamClosed = true;
         }
-
-        channel.send({
-            type: type,
-            flow: ctx.flow,
-            ref: data
+        channel.resume();
+        defer(function defer() {
+            channel.send({
+                type: type,
+                flow: ctx.flow,
+                ref: data,
+                order: true
+            });
         });
     }
 
     return {
+        flow: ctx.flow,
+
+        point: channel,
+
         write: function write$(data) {
             _write(data);
             return this;
@@ -537,3 +628,79 @@ function createWriteStream(ctx) {
         }
     };
 }
+
+function Queue(pipe) {
+    this.pipe = pipe;
+}
+
+module.exports.Queue = Queue;
+
+Queue.prototype = {
+    size: function size$(context) {
+        context = context || this.pipe.context;
+        return context ? this.getQueue(context).length : 0;
+    },
+
+    getQueue: function getQueue(context) {
+        context = context || this.pipe.context;
+        if (context) {
+            var pointCtx = this.pipe._pointCtx(context);
+            return pointCtx.queue = pointCtx.queue || [];
+        }
+    },
+
+    // return true, if message prcessing should be paused
+    add: function add(message) {
+        if (!message.order || // no keep order needed
+                message.pointId === this.pipe._id) {// or already in process
+            message.processed = true;
+            return false; // should continue
+        }
+
+        var queue = this.getQueue(message.context);
+        queue.unshift(message); // FIFO
+        message.pointId = this.pipe._id;
+        var moreInQueue = queue.length > 1;
+
+        message.processed = !moreInQueue;
+        return moreInQueue;
+    },
+
+    resume: function resume() {
+        var self = this;
+        var point = this.pipe;
+        defer(function deferResume() {
+            var queue = self.getQueue(point.context);
+            if (!queue) {
+                return;
+            }
+            var msg = queue[queue.length - 1];
+            if (msg) {
+                if (msg.processed) {
+                    // only resume if it was paused
+                    return self.done(msg);
+                }
+            }
+        });
+    },
+
+    done: function done(message) {
+        var point = this.pipe;
+        var queue = this.getQueue(message.context);
+        var msg = queue.pop();
+        if (msg !== message) {
+            throw new Error('The queue for ' + this.pipe._id + ' is broken');
+        }
+        // unbound message from this point
+        message.pointId = undefined;
+        delete message.processed;
+
+        // handle next message
+        msg = queue[queue.length - 1];
+        if (msg) {
+            defer(function () {
+                point.process(msg);
+            });
+        }
+    }
+};

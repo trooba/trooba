@@ -35,7 +35,7 @@ It is not another http based server framework like express, koa or hapi. It can 
 * You can link different pipelines together in definition or on-the-fly.
 * You can trace the route to troubleshoot any problems or learn some complex pipeline.
 
-![pipeline flow](./docs/images/arch3.png)
+![pipeline flow](./docs/images/arch4.png)
 
 ## Get Involved
 

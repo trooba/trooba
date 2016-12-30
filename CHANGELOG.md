@@ -10,7 +10,7 @@ pipe.build({
     ttl: 2000 // msec
 })
 ```
-* Request/response streaming preserve message order to avoid order conflicts.
+* Request/response streaming preserves message order to avoid out-of-order conflicts.
 * Changed tracing to use trace function as part of the context
 ```js
 pipe.build()

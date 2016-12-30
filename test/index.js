@@ -1193,7 +1193,7 @@ describe(__filename, function () {
             chunks.push(data);
             next();
         })
-        .on('response:end', function validateResponse() {
+        .once('response:end', function validateResponse() {
             Assert.deepEqual(['data1', 'data2', undefined], chunks);
             done();
         })
@@ -1732,11 +1732,12 @@ describe(__filename, function () {
         pipe.streamRequest('request')
             .write('foo')
             .write('bar')
-            .end()
+            .once('error', done)
             .on('response', function (response) {
                 Assert.deepEqual(['foo', 'bar', undefined], response);
                 done();
-            });
+            })
+            .end();
     });
 
     it('should catch only response chunks', function (done) {
@@ -4180,7 +4181,52 @@ describe(__filename, function () {
                 });
             }, 20);
         });
+
+        it('should detect broken pipe', function (done) {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {
+                pipe.once('request:data', function (data, next) {
+                    // brake the pipe
+                    pipe.queue().getQueue().pop();
+                    Assert.throws(function () {
+                        next();
+                    }, /The queue for h1-\d+ is broken/);
+                    done();
+                });
+            })
+            .build();
+
+            pipe.create()
+            .streamRequest('r1')
+            .write('d1')
+            .write('d2')
+            .end();
+        });
+
+        it('should get tail from head', function () {
+            var pipe = new Trooba()
+            .use(function h1(pipe) {})
+            .build();
+
+            Assert.ok(pipe !== pipe.tail);
+
+            pipe = new Trooba()
+            .build();
+
+            Assert.ok(pipe === pipe.tail);
+
+            // now without context
+            pipe.context = undefined;
+            Assert.ok(pipe === pipe.tail);
+        });
+
     });
 
+    it('should not find request API', function () {
+        var pipe = new Trooba();
+        Assert.throws(function () {
+            pipe.build().create('unknown API');
+        }, /Cannot find requested API: unknown API/);
+    });
 
 });

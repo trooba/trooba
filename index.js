@@ -129,7 +129,7 @@ module.exports.onDrop = function onDrop(message) {
 PipePoint.prototype = {
     send: function send$(message) {
         message.context = message.context || this.context;
-        if (!message.context.$inited) {
+        if (!message.context || !message.context.$inited) {
             throw new Error('The context has not been initialized, make sure you use pipe.create()');
         }
 
@@ -156,9 +156,6 @@ PipePoint.prototype = {
         }
 
         if (nextPoint) {
-            if (!message.context) {
-                throw new Error('Context is missing, make sure context() is used first');
-            }
             // forward message down the pipe
             nextPoint.process(message);
         }
@@ -650,6 +647,7 @@ Queue.prototype = {
     },
 
     getQueue: function getQueue(context) {
+        context = context || this.pipe.context;
         if (context) {
             var pointCtx = this.pipe._pointCtx(context);
             return pointCtx.queue = pointCtx.queue || [];

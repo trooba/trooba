@@ -53,9 +53,9 @@ npm install trooba --save
 
 ## Usage
 
-#### Http client example
+#### Client example
 
-Example on how the pipe for http calls can be configured is below. The handlers are not provided except for transport and need to be built. You can try simpler working examples mentioned down this page.
+Example on how the pipe for http calls can be configured. The middleware used is for demonstration and is not provided out of the box except for the transport and need to be built. You can try simpler working examples mentioned down this page.
 
 ```js
 require('trooba')
@@ -72,13 +72,34 @@ require('trooba')
         socketTimeout: 1000
     })
     .build()                    // build the pipe
-    .create({ foo: 'bar' })     // inject context
+    .create('client:default')     // create client
     .request({                  // initiate a request
         q: 'nike',
         method: 'GET'
     }, function (err, response) {// get the results
         console.log(err || response.body.toString());
     });
+```
+
+#### Service example
+
+Example on how one can configure a service endpoint. The middleware used is for demonstration and is not provided out of the box except for the transport and needs to be built. You can try simpler working examples mentioned down this page.
+
+```js
+require('trooba')
+    .use('trooba-grpc-transport', {
+        port: port,
+        hostname: 'localhost',
+        proto: Grpc.load(require.resolve('./path/to/hello.proto'))
+    })
+    .use('tracing')
+    .use('rate-limiter')
+    .use('security')
+    .use('tracking')
+    .use('router')
+    .build()                    // build the pipe
+    .create('service:default')     // create service
+    .listen();
 ```
 
 #### Building a pipe
@@ -100,7 +121,7 @@ var pipe = require('trooba')
     .use(retry, 2); // retry 2 times, see example of retry handler below
 ```
 
-#### Assign a transport
+#### Adding a transport
 
 ```js
 // setting transport or you can use module reference

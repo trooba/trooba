@@ -2,6 +2,11 @@
 
 ## Next version
 
+## v2.0.1
+* Disabled resuming on stream.write call to avoid conflicts that may arise from auto-resume in bi-directional stream.
+* Refined the logic related to what happens with the message when the pipe point is resumed. 
+* Added examples of request and response streaming.
+
 ## v2.0.0
 * Allow to link on-the-fly in message/request flow, not just at context init time.
 * Removed context init from trooba.build() call. Now it should only happen at pipe.create(). Build will only construct the pipeline and cache it with generic context.

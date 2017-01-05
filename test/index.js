@@ -809,10 +809,7 @@ describe(__filename, function () {
                 foo: 'bar'
             }, response);
 
-            if (count++ > 0) {
-                done();
-            }
-
+            done();
         });
     });
 
@@ -3409,8 +3406,9 @@ describe(__filename, function () {
                 pipe.on('request', function (request) {
                     stream = pipe.streamResponse(request);
                 });
-                pipe.on('request:data', function (data) {
+                pipe.on('request:data', function (data, next) {
                     stream.write(data);
+                    next();
                 });
             })
             .build();
@@ -3473,8 +3471,9 @@ describe(__filename, function () {
                 pipe.on('request', function (request) {
                     stream = pipe.streamResponse(request);
                 });
-                pipe.on('request:data', function (data) {
+                pipe.on('request:data', function (data, next) {
                     stream.write(data);
+                    next();
                 });
             })
             .build();
@@ -3784,6 +3783,7 @@ describe(__filename, function () {
                 });
                 pipe.on('request:data', function (data, next) {
                     stream.write(data);
+                    next();
                 });
             })
             .build();
@@ -3824,6 +3824,7 @@ describe(__filename, function () {
                 });
                 pipe.on('request:data', function (data, next) {
                     stream.write(data);
+                    next();
                 });
             })
             .build();
@@ -3863,13 +3864,15 @@ describe(__filename, function () {
                 pipe.on('request', function (request) {
                     stream = pipe.streamResponse(request);
                 });
-                pipe.on('request:data', function (data) {
+                pipe.on('request:data', function (data, next) {
                     if (data) {
                         stream.write(data);
+                        next();
                     }
                     else {
                         setTimeout(function () {
                             stream.write(data);
+                            next();
                         }, 60);
                     }
                 });
@@ -4024,8 +4027,9 @@ describe(__filename, function () {
                     }, 15);
                 });
 
-                pipe.on('request:data', function (data) {
+                pipe.on('request:data', function (data, next) {
                     stream.write(data);
+                    next();
                 });
             })
             .build();
@@ -4142,8 +4146,9 @@ describe(__filename, function () {
                     }, 15);
                 });
 
-                pipe.on('request:data', function (data) {
+                pipe.on('request:data', function (data, next) {
                     stream.write(data);
+                    next();
                 });
             })
             .build();
@@ -4229,4 +4234,56 @@ describe(__filename, function () {
         }, /Cannot find requested API: unknown API/);
     });
 
+    it('should handle paused stream', function (done) {
+        var pipe = new Trooba()
+        .use(function echo(pipe) {
+            var stream;
+            pipe.on('request', function (request, next) {
+                stream = pipe.streamResponse(request);
+                next();
+            });
+            pipe.on('request:data', function (data, next) {
+                stream.write(data);
+                // should allow mistakes of using multiple action that do resume
+                next();
+                next();
+            });
+        })
+        .build();
+
+        var order = [];
+
+        var stream = pipe.create().streamRequest('r1');
+
+        stream
+        .on('error', done);
+
+        var MAX = 10;
+
+        var count = 0;
+        stream
+        .on('response:data', function (data, next) {
+            if (count++ > 0) {
+                order.push(data);
+                return next();
+            }
+            // simulate pause
+            setTimeout(function () {
+                order.push(data);
+                next();
+            }, 50);
+        })
+        .on('response:end', function () {
+            Assert.equal(MAX + 1, order.length);
+            done();
+        });
+
+        for (var i = 0; i < MAX; i++) {
+            stream.write('foo' + i);
+        }
+        setImmediate(function () {
+            stream.end();
+        });
+
+    });
 });

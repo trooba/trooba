@@ -313,7 +313,7 @@ PipePoint.prototype = {
             queueAndIfQueued(message);
             // if sync delivery, than no callback needed before propagation further
             processMessage(anyType ? message : message.ref,
-                    message.sync ? undefined : onComplete);
+                    message.sync ? undefined : once(onComplete));
             if (!message.sync) {
                 // onComplete would continued the flow
                 return;
@@ -352,9 +352,9 @@ PipePoint.prototype = {
                 var endHandler = messageHandlers[
                     message.flow === Types.REQUEST ? 'request:end' : 'response:end'];
                 if (endHandler) {
-                    endHandler(function onComplete() {
+                    endHandler(once(function onComplete() {
                         point.send(message);
-                    });
+                    }));
                     return true;
                 }
             }
@@ -456,9 +456,8 @@ PipePoint.prototype = {
                 flow: Types.REQUEST,
                 ref: request
             };
-            if (point.context.$requestStream) {
-                msg.order = true; // order only streams
-            }
+            // order only streams
+            msg.order = !!point.context.$requestStream;
             point.send(msg);
         }
 
@@ -474,7 +473,6 @@ PipePoint.prototype = {
             return point;
         }
 
-        // this.context.$requestStream ? sendRequest() : defer(sendRequest, 0);
         defer(sendRequest);
 
         return point;
@@ -490,11 +488,8 @@ PipePoint.prototype = {
                 flow: Types.RESPONSE,
                 ref: response
             };
-
-            if (point.context.$responseStream) {
-                msg.order = true;
-            }
-
+            // order only streams
+            msg.order = !!point.context.$responseStream;
             point.send(msg);
         }
 
@@ -562,6 +557,13 @@ PipePoint.prototype = {
     }
 };
 
+function once(fn) {
+    return function once() {
+        fn.apply(null, arguments);
+        fn = function noop() {};
+    };
+}
+
 Object.defineProperty(PipePoint.prototype, 'next', {
     get: function getNext() {
         if (this.context && this.context.$points && this._next$) {
@@ -601,7 +603,7 @@ function createWriteStream(ctx) {
         if (data === undefined) {
             ctx.channel._streamClosed = true;
         }
-        channel.resume();
+
         defer(function defer() {
             channel.send({
                 type: type,
@@ -652,8 +654,7 @@ Queue.prototype = {
     // return true, if message prcessing should be paused
     add: function add(message) {
         if (!message.order || // no keep order needed
-                message.pointId === this.pipe._id) {// or already in process
-            message.processed = true;
+                message.inProcess) {// or already in process
             return false; // should continue
         }
 
@@ -661,27 +662,23 @@ Queue.prototype = {
         queue.unshift(message); // FIFO
         message.pointId = this.pipe._id;
         var moreInQueue = queue.length > 1;
+        message.inProcess = !moreInQueue;
 
-        message.processed = !moreInQueue;
         return moreInQueue;
     },
 
     resume: function resume() {
         var self = this;
         var point = this.pipe;
-        defer(function deferResume() {
-            var queue = self.getQueue(point.context);
-            if (!queue) {
-                return;
-            }
-            var msg = queue[queue.length - 1];
-            if (msg) {
-                if (msg.processed) {
-                    // only resume if it was paused
-                    return self.done(msg);
-                }
-            }
-        });
+        var queue = self.getQueue(point.context);
+        if (!queue) {
+            return;
+        }
+        var msg = queue[queue.length - 1];
+        // only resume if it was paused
+        if (msg && msg.inProcess) {
+            self.done(msg);
+        }
     },
 
     done: function done(message) {
@@ -693,11 +690,11 @@ Queue.prototype = {
         }
         // unbound message from this point
         message.pointId = undefined;
-        delete message.processed;
-
+        delete message.inProcess;
         // handle next message
         msg = queue[queue.length - 1];
         if (msg) {
+            msg.inProcess = true;
             defer(function () {
                 point.process(msg);
             });

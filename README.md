@@ -1,11 +1,13 @@
-![trooba](./docs/images/trooba-logo.png)
+<p align="center">
+    <img src="https://github.com/trooba/branding/raw/master/images/trooba_trans_bg.png" alt="Trooba logo" width="332" /><br /><br />
+</p>
 
 [![codecov](https://codecov.io/gh/trooba/trooba/branch/master/graph/badge.svg)](https://codecov.io/gh/trooba/trooba)
 [![Build Status](https://travis-ci.org/trooba/trooba.svg?branch=master)](https://travis-ci.org/trooba/trooba) [![NPM](https://img.shields.io/npm/v/trooba.svg)](https://www.npmjs.com/package/trooba)
 [![Downloads](https://img.shields.io/npm/dm/trooba.svg)](http://npm-stat.com/charts.html?package=trooba)
 [![Known Vulnerabilities](https://snyk.io/test/github/trooba/trooba/badge.svg)](https://snyk.io/test/github/trooba/trooba)
 
-"Trooba" [tru:ba'] means "Pipe" in Russian
+"Trooba" [tru:ba'] means "Pipe" in Russian and [it is not a pipe.](https://www.wikiart.org/en/rene-magritte/the-treachery-of-images-this-is-not-a-pipe-1948)
 
 ## What is it?
 
@@ -35,7 +37,7 @@ It is not another http based server framework like express, koa or hapi. It can 
 * You can link different pipelines together in definition or on-the-fly.
 * You can trace the route to troubleshoot any problems or learn some complex pipeline.
 
-![pipeline flow](./docs/images/arch4.png)
+![pipeline flow](https://github.com/trooba/branding/raw/master/images/arch.png)
 
 ## Get Involved
 
@@ -152,7 +154,6 @@ pipe.create()
     })
     .on('error', console.error)
     .on('response', console.log);
-// ================================== //
 ```
 
 Or you can do it with a callback style
@@ -161,7 +162,6 @@ pipe.create()
     .request({
         qwe: 'asd'
     }, console.log);
-// ================================== //
 ```
 
 **Note:** Though pipe API to add hooks looks like event emitter, it does not allow multiple hooks and will throw error if one attempts to add a hook for the event that already has it.
@@ -237,15 +237,12 @@ Example:
 }
 ```
 
-**Note:** Since Trooba framework is based on message propagation through the pipeline, it uses time-to-live (TTL) parameter to limit the time the message can travel through the pipeline. By default it uses 1000ms for TTL, but you can configure it using config.ttl parameter.
+**Note:** Since Trooba framework is based on message propagation through the pipeline, it uses time-to-live (TTL) parameter to limit the time the message can travel through the pipeline. By default it uses Infinity for TTL, but you can configure it using config.ttl parameter.
 
-```js
-// set TTL to 2 seconds
-Trooba.use(handler)
-```
 When a message is expired, it will be dropped through console.log by default or you can intercept it by registering your own onDrop handler to the context
 ```js
-Trooba.build({
+// set TTL to 2 seconds
+pipe.build({
     ttl: 2000, // msec
     onDrop: function (message) {
         console.log('dropped message:', message);
@@ -705,19 +702,16 @@ var pipe = Trooba.use(transportFactory, {
 }).build();
 
 // REQUEST execution
-// ========================================= //
 pipe.create().request({
     q: 'nike'
 }, (err, response) => console.log);
 
 // or you can skip callback and listen to events
-// ========================================= //
 pipe.create().request({
     q: 'nike'
 })
 .on('error', console.error)
 .on('response', console.log);
-// ========================================= //
 ```
 
 #### Transport definition using http protocol and custom API

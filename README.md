@@ -1,4 +1,6 @@
-![trooba](./docs/images/trooba-logo.png)
+<p align="center">
+    <img src="/docs/images/trooba_logo.png" alt="Trooba logo" width="300" /><br /><br />
+</p>
 
 [![codecov](https://codecov.io/gh/trooba/trooba/branch/master/graph/badge.svg)](https://codecov.io/gh/trooba/trooba)
 [![Build Status](https://travis-ci.org/trooba/trooba.svg?branch=master)](https://travis-ci.org/trooba/trooba) [![NPM](https://img.shields.io/npm/v/trooba.svg)](https://www.npmjs.com/package/trooba)

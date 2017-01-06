@@ -154,7 +154,6 @@ pipe.create()
     })
     .on('error', console.error)
     .on('response', console.log);
-// ================================== //
 ```
 
 Or you can do it with a callback style
@@ -163,7 +162,6 @@ pipe.create()
     .request({
         qwe: 'asd'
     }, console.log);
-// ================================== //
 ```
 
 **Note:** Though pipe API to add hooks looks like event emitter, it does not allow multiple hooks and will throw error if one attempts to add a hook for the event that already has it.
@@ -239,15 +237,12 @@ Example:
 }
 ```
 
-**Note:** Since Trooba framework is based on message propagation through the pipeline, it uses time-to-live (TTL) parameter to limit the time the message can travel through the pipeline. By default it uses 1000ms for TTL, but you can configure it using config.ttl parameter.
+**Note:** Since Trooba framework is based on message propagation through the pipeline, it uses time-to-live (TTL) parameter to limit the time the message can travel through the pipeline. By default it uses Infinity for TTL, but you can configure it using config.ttl parameter.
 
-```js
-// set TTL to 2 seconds
-Trooba.use(handler)
-```
 When a message is expired, it will be dropped through console.log by default or you can intercept it by registering your own onDrop handler to the context
 ```js
-Trooba.build({
+// set TTL to 2 seconds
+pipe.build({
     ttl: 2000, // msec
     onDrop: function (message) {
         console.log('dropped message:', message);
@@ -707,19 +702,16 @@ var pipe = Trooba.use(transportFactory, {
 }).build();
 
 // REQUEST execution
-// ========================================= //
 pipe.create().request({
     q: 'nike'
 }, (err, response) => console.log);
 
 // or you can skip callback and listen to events
-// ========================================= //
 pipe.create().request({
     q: 'nike'
 })
 .on('error', console.error)
 .on('response', console.log);
-// ========================================= //
 ```
 
 #### Transport definition using http protocol and custom API

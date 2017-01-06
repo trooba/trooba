@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="https://github.com/trooba/branding/raw/master/images/trooba_logo.png" alt="Trooba logo" width="300" /><br /><br />
+    <img src="https://github.com/trooba/branding/raw/master/images/trooba_trans_bg.png" alt="Trooba logo" width="332" /><br /><br />
 </p>
 
 [![codecov](https://codecov.io/gh/trooba/trooba/branch/master/graph/badge.svg)](https://codecov.io/gh/trooba/trooba)

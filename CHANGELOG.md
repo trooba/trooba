@@ -2,6 +2,9 @@
 
 ## Next version
 
+## v2.0.2
+* Branding changes
+
 ## v2.0.1
 * Disabled resuming on stream.write call to avoid conflicts that may arise from auto-resume in bi-directional stream.
 * Refined the logic related to what happens with the message when the pipe point is resumed. 

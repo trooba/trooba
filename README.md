@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="/docs/images/trooba_logo.png" alt="Trooba logo" width="300" /><br /><br />
+    <img src="https://github.com/trooba/branding/raw/master/images/trooba_logo.png" alt="Trooba logo" width="300" /><br /><br />
 </p>
 
 [![codecov](https://codecov.io/gh/trooba/trooba/branch/master/graph/badge.svg)](https://codecov.io/gh/trooba/trooba)
@@ -37,7 +37,7 @@ It is not another http based server framework like express, koa or hapi. It can 
 * You can link different pipelines together in definition or on-the-fly.
 * You can trace the route to troubleshoot any problems or learn some complex pipeline.
 
-![pipeline flow](./docs/images/arch4.png)
+![pipeline flow](https://github.com/trooba/branding/raw/master/images/arch.png)
 
 ## Get Involved
 

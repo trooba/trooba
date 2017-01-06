@@ -7,7 +7,7 @@
 [![Downloads](https://img.shields.io/npm/dm/trooba.svg)](http://npm-stat.com/charts.html?package=trooba)
 [![Known Vulnerabilities](https://snyk.io/test/github/trooba/trooba/badge.svg)](https://snyk.io/test/github/trooba/trooba)
 
-"Trooba" [tru:ba'] means "Pipe" in Russian
+"Trooba" [tru:ba'] means "Pipe" in Russian and [it is not a pipe.](https://www.wikiart.org/en/rene-magritte/the-treachery-of-images-this-is-not-a-pipe-1948)
 
 ## What is it?
 

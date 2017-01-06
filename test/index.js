@@ -3448,7 +3448,7 @@ describe(__filename, function () {
                     }
                     setTimeout(function delay() {
                         next();
-                    }, 100);
+                    }, 50);
                 });
                 pipe.on('response:data', function (data, next) {
                     if (resCount++ > 0) {
@@ -3456,14 +3456,14 @@ describe(__filename, function () {
                     }
                     setTimeout(function delay() {
                         next();
-                    }, 100);
+                    }, 50);
                 });
             })
             .use(function h1(pipe) {
                 pipe.on('request', function (request, next) {
                     setTimeout(function delay() {
                         next();
-                    }, 100);
+                    }, 50);
                 });
             })
             .use(function h2(pipe) {

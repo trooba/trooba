@@ -140,9 +140,7 @@ pipe.use(function transport(pipe) {
 
 Injecting static context if any needed or this can be skipped.
 ```js
-pipe = pipe.build({  
-    foo: bar   
-})
+pipe = pipe.build()
 ```
 At this point the pipe becomes re-usable between multiple "parallel" requests.
 
@@ -150,7 +148,7 @@ Make a request
 ```js
 pipe.create()
     .request({
-        qwe: 'asd'
+        name: 'John'
     })
     .on('error', console.error)
     .on('response', console.log);
@@ -160,12 +158,45 @@ Or you can do it with a callback style
 ```js
 pipe.create()
     .request({
-        qwe: 'asd'
+        name: 'John'
     }, console.log);
 ```
 
 **Note:** Though pipe API to add hooks looks like event emitter, it does not allow multiple hooks and will throw error if one attempts to add a hook for the event that already has it.
 If you really need to support multiple listeners, you can add an event dispatcher as a hook.
+
+#### Creating custom pipeline protocols
+
+The 'request' and 'response' hooks used above are just event names and a developer is not limited to them.
+One can create different protocols using different names. Trooba framework just provides default protocol based on request/response pattern. One can mix custom events in the default pipeline or create completely new one if needed.
+
+##### Adding custom event
+
+Let's assume we want to update global config for some handlers.
+
+```js
+// setting transport or you can use module reference
+let config;    
+
+pipe.use(function config(pipe) {
+    // hook to config message
+    pipe.on('config', function (cfg) {
+        config = cfg;
+    });
+})
+```
+
+##### Broadcast configuration
+```js
+pipe.create()
+    .send({
+        type: 'config',
+        flow: Types.REQUEST,
+        ref: {
+            some: 'config'
+        }
+    });
+```
 
 ### Trooba API
 

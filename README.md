@@ -66,7 +66,7 @@ require('trooba')
     .use('logging')
     .use('tracing')
     .use('security')
-    .use('tracking')
+    .use('analytics')
     .use('trooba-http-transport', {
         protocol: 'http:',
         hostname: 'www.google.com',
@@ -97,7 +97,7 @@ require('trooba')
     .use('tracing')
     .use('rate-limiter')
     .use('security')
-    .use('tracking')
+    .use('analytics')
     .use('router')
     .build()                    // build the pipe
     .create('service:default')     // create service

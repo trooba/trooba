@@ -1,11 +1,11 @@
 .jshintrc
 Makefile
 .jshintignore
-doc
+docs
 test
 examples
 .atom-build.json
-tracking-context-request.md
 .beans
 .cache
 .git
+.github

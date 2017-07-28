@@ -13,6 +13,8 @@
 
 Trooba a fast isomorphic lightweight pipeline framework from eBay. Trooba can build pipelines for request/response, stream/response, request/response and stream/stream use-cases spanning from a browser to a front-end app and further to a backend services.
 
+[Try it online](https://trooba.github.io/) to see what it can do for you as well as read about ideas behind it [here](https://trooba.github.io/docs/introduction-overview/)
+
 It uses a stateless generic pipeline/bus used to route multiple requests in "parallel" without any conflicts. The contextual information is passed along with the message.
 
 Trooba does not dictate specific data structures that should be used for request/response/messages/stream objects. It assumes basic requirements and leaves everything else to the implementor of the transport.

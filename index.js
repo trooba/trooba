@@ -397,7 +397,11 @@ PipePoint.prototype = {
 
         var current = head;
         while(current) {
-            current.handler(current, current.config);
+            var ret = current.handler(current, current.config);
+            if (ret instanceof PipePoint) {
+                // if pipe is returned, let's attach it to the existing one
+                current.link(ret);
+            }
             current = current._next$ ?
                 current._next$.copy(context) : undefined;
         }

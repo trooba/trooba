@@ -16,3 +16,4 @@ log
 project.sublime-workspace
 test/static
 coverage/*
+yarn.lock

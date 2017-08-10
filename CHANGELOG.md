@@ -1,7 +1,7 @@
 # ChangeLog
 
 ## Next version
-* Added support for nested pipes that can be retuned by some pipe handlers instead of hooking to the main flow.
+* Added support for nested pipes/handlers that can be retuned by some pipe handlers instead of hooking to the main flow.
 
 ## v2.0.2
 * Branding changes

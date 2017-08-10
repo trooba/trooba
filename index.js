@@ -402,6 +402,10 @@ PipePoint.prototype = {
                 // if pipe is returned, let's attach it to the existing one
                 current.link(ret);
             }
+            else if (ret) {
+                current.handler = ret;
+                current.handler(current, current.config);
+            }
             current = current._next$ ?
                 current._next$.copy(context) : undefined;
         }

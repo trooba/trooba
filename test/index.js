@@ -2071,6 +2071,27 @@ describe(__filename, function () {
             .request();
         });
 
+        it('should build pipe out of main and a single pipe handler', function (next) {
+            var seq = [];
+            Trooba
+            .use(function () {
+                seq.push('main.before');
+            })
+            .use(function (pipe) {
+                return function (pipe) {
+                    seq.push('handler');
+                };
+            })
+            .use(function (pipe) {
+                seq.push('main.after');
+                Assert.deepEqual('main.before/handler/main.after', seq.join('/'));
+                next();
+            })
+            .build()
+            .create()
+            .request();
+        });
+
         it('should build pipe out of main and child pipe and run ping-pong', function (next) {
             var seq = [];
             Trooba
@@ -2122,6 +2143,48 @@ describe(__filename, function () {
             .create()
             .request('ping', function (err, response) {
                 Assert.deepEqual('main.before.req/child.one.req/child.two.req/main.after/child.two.res/child.one.res/main.before.res', seq.join('/'));
+                next();
+            });
+        });
+
+        it('should build pipe out of main and a single child handler to run ping-pong', function (next) {
+            var seq = [];
+            Trooba
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    seq.push('main.before.req');
+                    next();
+                });
+
+                pipe.on('response', function (response, next) {
+                    seq.push('main.before.res');
+                    next();
+                });
+            })
+            .use(function () {
+                return function (pipe) {
+                    pipe.on('request', function (request, next) {
+                        seq.push('handler.req');
+                        next();
+                    });
+
+                    pipe.on('response', function (response, next) {
+                        seq.push('handler.res');
+                        next();
+                    });
+                };
+            })
+            .use(function (pipe) {
+                pipe.on('request', function () {
+                    seq.push('main.after');
+                    Assert.deepEqual('main.before.req/handler.req/main.after', seq.join('/'));
+                    pipe.respond('pong');
+                });
+            })
+            .build()
+            .create()
+            .request('ping', function (err, response) {
+                Assert.deepEqual('main.before.req/handler.req/main.after/handler.res/main.before.res', seq.join('/'));
                 next();
             });
         });

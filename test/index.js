@@ -318,6 +318,26 @@ describe(__filename, function () {
         });
     });
 
+    it('should preserve properties in pipe.store', function (done) {
+        var pipe = Trooba
+        .use(function (pipe) {
+            pipe.on('request', function (request) {
+                if (request === 'get') {
+                    return pipe.respond(pipe.store.request);
+                }
+                pipe.store.request = request;
+            });
+        })
+        .build();
+
+        pipe.create().request('foo', function () {});
+        pipe.create().request('get', function (err, response) {
+            Assert.ok(!err);
+            Assert.equal('foo', response);
+            done();
+        });
+    });
+
     it('should execute a chain', function (done) {
         Trooba
         .use(function handler(pipe) {

@@ -216,12 +216,24 @@ The pipe object is passed to all handlers and transport during initialization wh
 * **`create`**`([context], [customApiImpl])` - creates a pipeline with new context or clones from the existing one if any present. The method is mandatory to initiate a new flow, otherwise the subsequent call will fail.
      * **`context`** is a context object to be used in request/message flow.
      * **`customApiImpl`** is a name for a specific API implementation. It allows to inject custom API provided by one of the handlers that needs to be returned instead of the generic pipe interface.
-* **`context`** - is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed. The values in the context that have their names started with '$' will not be propagated beyond the pipe boundaries. To access context one can use pipe.context;
-* **`link`**`(pipe)` - links passed pipeline to the current one. The link between pipes exists as long as the context where they were linked exists. Once pipe.create is used, it will lose the link. The linking can be useful to join pipes on the fly, for example to bootstrap pipe from config file and inline it into existing pipeline where bootstrap handler is registered.
+* **`context`** is an object available to all handlers/transport in the same request/response flow. One can use it to store data that needs to be shared between handlers if needed. The values in the context that have their names started with '$' will not be propagated beyond the pipe boundaries. To access context one can use pipe.context;
+* **`store`** is a storage for properties specific to the given pipe point. This is useful to share things between different requests. One can store there objects that needs to be initialized only once.
+```js
+Trooba.use(function (pipe, config) {
+    if (!pipe.store.obj) {
+        // do it only once
+        pipe.store.obj = createSomething(config);
+    }
+    pipe.on('request', function (request) {
+        pipe.respond(pipe.store.obj);
+    });
+});
+```
+* **`link`**`(pipe)` links passed pipeline to the current one. The link between pipes exists as long as the context where they were linked exists. Once pipe.create is used, it will lose the link. The linking can be useful to join pipes on the fly, for example to bootstrap pipe from config file and inline it into existing pipeline where bootstrap handler is registered.
 ```js
 Trooba.use(function bootstrapPipe(pipe) {
     // load all the handlers from some json or config file
-    var handlers = []; // assume it is loaded as an array
+    var handlers = ['handler-1', 'handler-2', ...]; // assume it is loaded as an array
     // build the pipe or load from cache
     var bootstrappedPipe = handlers.reduce((trooba, handler) => {
         return trooba.use(handler);

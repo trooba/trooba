@@ -119,6 +119,7 @@ function PipePoint(handler) {
     PipePoint.instanceCounter = PipePoint.instanceCounter ? PipePoint.instanceCounter : 0;
     this._uid = PipePoint.instanceCounter++;
     this._id = (this.handler ? this.handler.name + '-' : '') + this._uid;
+    this.store = {};
 }
 
 module.exports.PipePoint = PipePoint;
@@ -186,6 +187,7 @@ PipePoint.prototype = {
         ret._messageHandlers = this._messageHandlers;
         ret.config = this.config;
         ret.handler = this.handler;
+        ret.store = this.store;
         ret.context = context;
         ret._pointCtx();
         return ret;

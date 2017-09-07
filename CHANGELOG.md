@@ -1,13 +1,15 @@
 # ChangeLog
 
 ## Next version
+* Added pipe.store to store properties specific to the given pipe point. This is useful to share things between different requests. One can store there objects that needs to be initialized only once. 
+* Added support for nested pipes/handlers that can be retuned by some pipe handlers instead of hooking to the main flow.
 
 ## v2.0.2
 * Branding changes
 
 ## v2.0.1
 * Disabled resuming on stream.write call to avoid conflicts that may arise from auto-resume in bi-directional stream.
-* Refined the logic related to what happens with the message when the pipe point is resumed. 
+* Refined the logic related to what happens with the message when the pipe point is resumed.
 * Added examples of request and response streaming.
 
 ## v2.0.0

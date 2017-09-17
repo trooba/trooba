@@ -11,6 +11,8 @@
 
 ## What is it?
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/trooba/trooba.svg)](https://greenkeeper.io/)
+
 Trooba a fast isomorphic lightweight pipeline framework from eBay. Trooba can build pipelines for request/response, stream/response, request/response and stream/stream use-cases spanning from a browser to a front-end app and further to a backend services.
 
 [Try it online](https://trooba.github.io/) to see what it can do for you as well as read about ideas behind it [here](https://trooba.github.io/docs/introduction-overview/)

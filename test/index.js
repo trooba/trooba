@@ -4537,7 +4537,7 @@ describe(__filename, function () {
     });
 
     if (process.versions.node.split('.').shift() >= 4) {
-        it('should not fail when arrow function is used in handlers', next => {
+        it('should not fail when arrow function is used in handlers', function (next) {
             Trooba
             .use(pipe => pipe.on('request', request => {
                 pipe.respond('pong');

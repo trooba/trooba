@@ -1,19 +1,14 @@
 node_js:
 - "0.12"
-env:
-    - TARGET=test-0.12
+  env: TARGET test-0.12
 - "4"
-env:
-    - TARGET=test
+  env: TARGET test
 - "6"
-env:
-    - TARGET=test
+  env: TARGET test
 - "7"
-env:
-    - TARGET=test
+  env: TARGET test
 - "8"
-env:
-    - TARGET=test
+  env: TARGET test
 language: node_js
 install:
 - npm install

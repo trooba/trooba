@@ -1,3 +1,4 @@
+/*jshint esversion:6 */
 'use strict';
 
 var Assert = require('assert');
@@ -803,7 +804,6 @@ describe(__filename, function () {
     });
 
     it('should handle double next without error with next', function (done) {
-        var count = 0;
         Trooba
         .use(function handler(pipe) {
             pipe.on('request', function (request, next) {
@@ -1874,7 +1874,7 @@ describe(__filename, function () {
 
     });
 
-    it('should throw errer on way back', function (done) {
+    it('should throw errer on the way back', function (done) {
         Trooba
         .use(function handler(pipe) {
             pipe.on('response', function () {
@@ -3933,6 +3933,89 @@ describe(__filename, function () {
             .end();
         });
 
+        it('should replace response with pipe.response', function (done) {
+            var pipe = new Trooba()
+            .use(function (pipe) {
+                pipe.on('response', function (response) {
+                    pipe.respond('replaced');
+                });
+            })
+            .use(function (pipe) {
+                pipe.on('request', function (request) {
+                    pipe.respond('pong');
+                });
+            })
+            .build();
+
+            pipe.create()
+            .request('ping', function (err, response) {
+                Assert.equal('replaced', response);
+                setImmediate(done);
+            });
+        });
+
+        it('should replace response and stop existing response stream', function (done) {
+            var pipe = new Trooba()
+            .use(function (pipe) {
+                pipe.on('response', function (response, next) {
+                    pipe.respond('replaced');
+                });
+            })
+            .use(function (pipe) {
+                pipe.on('request', function (request) {
+                    var stream = pipe.streamResponse('pong');
+                    stream.write('data');
+                    stream.end();
+                });
+            })
+            .build();
+
+            var _response;
+
+            pipe
+            .create()
+            .request('ping')
+            .on('response', function (response, next) {
+                _response = response;
+                Assert.equal('replaced', response);
+                done();
+            })
+            .on('response:data', function (data, next) {
+                done(new Error('Should never happen'));
+            })
+            .on('error', done);
+        });
+
+        it('should replace request and stop existing request stream', function (done) {
+            var pipe = new Trooba()
+            .use(function (pipe) {
+                pipe.on('request', function (response, next) {
+                    pipe.request('replaced');
+                });
+            })
+            .use(function (pipe) {
+                pipe.on('request', function (request) {
+                    Assert.equal('replaced', request);
+                    pipe.respond('pong');
+                });
+                pipe.on('request:data', function (data) {
+                    done(new Error('Should never happen'));
+                });
+            })
+            .build();
+
+            pipe
+            .create()
+            .streamRequest('ping')
+            .on('error', done)
+            .on('response', function (response) {
+                Assert.equal('pong', response);
+                done();
+            })
+            .write('data')
+            .end();
+        });
+
         it('should resume response flow when next() is called', function (done) {
             var pipe = new Trooba()
             .use(function h1(pipe) {
@@ -4451,5 +4534,19 @@ describe(__filename, function () {
             stream.end();
         });
 
+    });
+
+    it('should not fail when arrow function is used in handlers', next => {
+        Trooba
+        .use(pipe => pipe.on('request', request => {
+            pipe.respond('pong');
+        }))
+        .build()
+        .create()
+        .request('ping', (err, response) => {
+            Assert.ok(!err);
+            Assert.equal('pong', response);
+            next();
+        });
     });
 });

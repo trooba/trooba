@@ -1,7 +1,14 @@
 # ChangeLog
 
-## v2.1.0 
-* Added pipe.store to store properties specific to the given pipe point. This is useful to share things between different requests. One can store there objects that needs to be initialized only once. 
+## v2.1.1
+* Fix: Trooba should restart the stream when request/response is restarted.
+* Fix: Should not fail when arrow function is used on use method, example:
+```js
+Trooba.use(pipe => pipe.on('request', request => {}));
+```
+
+## v2.1.0
+* Added pipe.store to store properties specific to the given pipe point. This is useful to share things between different requests. One can store there objects that needs to be initialized only once.
 * Added support for nested pipes/handlers that can be retuned by some pipe handlers instead of hooking to the main flow.
 
 ## v2.0.2

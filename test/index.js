@@ -3986,6 +3986,40 @@ describe(__filename, function () {
             .on('error', done);
         });
 
+        it('should replace response and stop existing response stream with delayed write', function (done) {
+            var pipe = new Trooba()
+            .use(function (pipe) {
+                pipe.on('response', function (response, next) {
+                    pipe.respond('replaced');
+                });
+            })
+            .use(function (pipe) {
+                pipe.on('request', function (request) {
+                    var stream = pipe.streamResponse('pong');
+                    setImmediate(function () {
+                        stream.write('data');
+                        stream.end();
+                    });
+                });
+            })
+            .build();
+
+            var _response;
+
+            pipe
+            .create()
+            .request('ping')
+            .on('response', function (response, next) {
+                _response = response;
+                Assert.equal('replaced', response);
+                done();
+            })
+            .on('response:data', function (data, next) {
+                done(new Error('Should never happen'));
+            })
+            .on('error', done);
+        });
+
         it('should replace request and stop existing request stream', function (done) {
             var pipe = new Trooba()
             .use(function (pipe) {

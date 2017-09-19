@@ -271,10 +271,6 @@ PipePoint.prototype = {
     },
 
     process: function (message) {
-        if (shouldIgnore(message)) {
-            return;
-        }
-
         var point = this;
 
         // get the hooks

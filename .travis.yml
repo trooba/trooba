@@ -4,23 +4,23 @@ matrix:
     - node_js: "0.12" # this is not strictly necessary
       env:
           - TARGET=test-0.12
-          - TEST=test/index test/readme
+          - TESTS=test/index test/readme
     - node_js: "4"
       env:
           - TARGET=test
-          - TEST=test/index test/readme test/index.4.x
+          - TESTS=test/index test/readme test/index.4.x
     - node_js: "6"
       env:
           - TARGET=test
-          - TEST=test/index test/readme test/index.4.x
+          - TESTS=test/index test/readme test/index.4.x
     - node_js: "7"
       env:
           - TARGET=test
-          - TEST=test/index test/readme test/index.4.x
+          - TESTS=test/index test/readme test/index.4.x
     - node_js: "8"
       env:
           - TARGET=test
-          - TEST=test/index test/readme test/index.4.x
+          - TESTS=test/index test/readme test/index.4.x
 install:
 - npm install
 - npm install -g codecov istanbul

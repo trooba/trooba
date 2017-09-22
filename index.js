@@ -7,6 +7,12 @@ var defer = process && process.nextTick && process.nextTick.bind(process) ||
         setTimeout(fn, 0); // this is much slower then setImmediate or nextTick
     };
 
+function createPipeConnector(to) {
+    return function pipeConnect(pipe) {
+        pipe.link(to);
+    };
+}
+
 /**
  * Assigns transport to the client pipeline
 */
@@ -16,28 +22,25 @@ function Trooba() {
 
 Trooba.prototype = {
 
-    use: function use(handler, config) {
+    use: function (handler, config) {
         if (typeof handler === 'string') {
             handler = require(handler);
         }
 
         if (handler instanceof PipePoint) {
-            var pipeTo = handler;
-            handler = function pipeConnect(pipe) {
-                pipe.link(pipeTo);
-            };
+            handler = createPipeConnector(handler);
         }
 
         this._handlers.push({
             handler: handler,
             config: config
         });
-
+        // TODO: create test for pipe caching
         this._pipe = undefined;
         return this;
     },
 
-    build: function build$(context) {
+    build: function (context) {
         var pipe = this._pipe;
         if (!pipe || context) {
             var handlers = this._handlers.slice();
@@ -128,7 +131,11 @@ module.exports.onDrop = function onDrop(message) {
 };
 
 PipePoint.prototype = {
-    send: function send$(message) {
+    send: function (message) {
+        if (shouldIgnore(message)) {
+            return;
+        }
+
         message.context = message.context || this.context;
         if (!message.context || !message.context.$inited) {
             throw new Error('The context has not been initialized, make sure you use pipe.create()');
@@ -178,7 +185,7 @@ PipePoint.prototype = {
         return this;
     },
 
-    copy: function copy$(context) {
+    copy: function (context) {
         var ret = new PipePoint();
         ret._next$ = this._next$;
         ret._prev$ = this._prev$;
@@ -193,16 +200,16 @@ PipePoint.prototype = {
         return ret;
     },
 
-    set: function set$(name, value) {
+    set: function (name, value) {
         this.context['$'+name] = value;
         return this;
     },
 
-    get: function get$(name) {
+    get: function (name) {
         return this.context['$'+name];
     },
 
-    link: function link$(pipe) {
+    link: function (pipe) {
         var self = this;
         if (this._pointCtx().$linked) {
             throw new Error('The pipe already has a link');
@@ -232,7 +239,7 @@ PipePoint.prototype = {
         });
     },
 
-    trace: function trace$(callback) {
+    trace: function (callback) {
         var self = this;
         callback = callback || console.log;
         var route = [{
@@ -263,7 +270,7 @@ PipePoint.prototype = {
         queue && queue.resume();
     },
 
-    process: function process$(message) {
+    process: function (message) {
         var point = this;
 
         // get the hooks
@@ -376,7 +383,7 @@ PipePoint.prototype = {
     * to allow them to hook to events they are interested in
     * The context will be attached to every message and bound to pipe
     */
-    create: function create$(context, interfaceName) {
+    create: function (context, interfaceName) {
         if (typeof arguments[0] === 'string') {
             interfaceName = arguments[0];
             context = undefined;
@@ -400,13 +407,15 @@ PipePoint.prototype = {
         var current = head;
         while(current) {
             var ret = current.handler(current, current.config);
-            if (ret instanceof PipePoint) {
-                // if pipe is returned, let's attach it to the existing one
-                current.link(ret);
-            }
-            else if (ret) {
-                current.handler = ret;
-                current.handler(current, current.config);
+            if (ret && !ret._handlersConfigured) {
+                if (ret instanceof PipePoint) {
+                    // if pipe is returned, let's attach it to the existing one
+                    current.link(ret);
+                }
+                else {
+                    current.handler = ret;
+                    current.handler(current, current.config);
+                }
             }
             current = current._next$ ?
                 current._next$.copy(context) : undefined;
@@ -424,7 +433,7 @@ PipePoint.prototype = {
         return api(head);
     },
 
-    throw: function throw$(err) {
+    throw: function (err) {
         this.send({
             type: 'error',
             flow: Types.RESPONSE,
@@ -443,12 +452,13 @@ PipePoint.prototype = {
         };
     },
 
-    streamRequest: function streamRequest$(request) {
+    streamRequest: function (request) {
         this.context.$requestStream = true;
         var point = this.request(request);
         var writeStream = createWriteStream({
             channel: point,
-            flow: Types.REQUEST
+            flow: Types.REQUEST,
+            session: this.context.$requestSession
         });
 
         this._exposePipeHooks(point, writeStream);
@@ -456,8 +466,12 @@ PipePoint.prototype = {
         return writeStream;
     },
 
-    request: function request$(request, callback) {
+    request: function (request, callback) {
         var point = this;
+        if (this.context.$requestSession) {
+            this.context.$requestSession.closed = true;
+        }
+        this.context.$requestSession = {}; // new session
         this.resume();
 
         function sendRequest() {
@@ -488,8 +502,14 @@ PipePoint.prototype = {
         return point;
     },
 
-    respond: function respond$(response) {
+    respond: function (response) {
         var point = this;
+
+        if (this.context.$responseSession) {
+            this.context.$responseSession.closed = true;
+        }
+        this.context.$responseSession = {};
+
         this.resume();
 
         function sendResponse() {
@@ -508,45 +528,47 @@ PipePoint.prototype = {
         return this;
     },
 
-    streamResponse: function streamResponse$(response) {
+    streamResponse: function (response) {
         this.context.$responseStream = true;
         var point = this.respond(response);
 
-        var steram = this.context.$responseStream = createWriteStream({
+        var stream = this.context.$responseStream = createWriteStream({
             channel: point,
-            flow: Types.RESPONSE
+            flow: Types.RESPONSE,
+            session: this.context.$responseSession
         });
-        this._exposePipeHooks(point, steram);
-        return steram;
+        this._exposePipeHooks(point, stream);
+        return stream;
     },
 
     /*
     * Message handlers will be attached to specific context and mapped to a specific point by its _id
     * This is need to avoid re-creating pipe for every new context
     */
-    on: function onEvent$(type, handler) {
+    on: function (type, handler) {
         var handlers = this.handlers();
         if (handlers[type]) {
             throw new Error('The hook has already been registered, you can use only one hook for specific event type: ' + type + ', point.id:' + this._id);
         }
         handlers[type] = handler;
+        this._handlersConfigured = true;
         return this;
     },
 
-    once: function onceEvent$(type, handler) {
+    once: function (type, handler) {
         var self = this;
         this.on(type, function onceFn() {
-            delete self.handlers()[type];
+            self.removeListener(type);
             handler.apply(null, arguments);
         });
         return this;
     },
 
-    removeListener: function removeListener$(type) {
+    removeListener: function (type) {
         delete this.handlers()[type];
     },
 
-    _pointCtx: function _pointCtx$(ctx) {
+    _pointCtx: function (ctx) {
         ctx = ctx || this.context;
         if (!ctx) {
             throw new Error('Context is missing, please make sure context() is used first');
@@ -557,12 +579,12 @@ PipePoint.prototype = {
         };
     },
 
-    handlers: function handlers$(ctx) {
+    handlers: function (ctx) {
         var pointCtx = this._pointCtx(ctx);
         return pointCtx._messageHandlers = pointCtx._messageHandlers || {};
     },
 
-    queue: function queue$() {
+    queue: function () {
         return this._queue = this._queue || new Queue(this);
     }
 };
@@ -606,6 +628,11 @@ function createWriteStream(ctx) {
     var channel = ctx.channel;
 
     function _write(data) {
+        // session can be closed by initiating new request/response
+        if (ctx.session.closed) {
+            return;
+        }
+
         if (channel._streamClosed) {
             throw new Error('The stream has been closed already');
         }
@@ -619,7 +646,8 @@ function createWriteStream(ctx) {
                 type: type,
                 flow: ctx.flow,
                 ref: data,
-                order: true
+                order: true,
+                session: ctx.session
             });
         });
     }
@@ -629,16 +657,20 @@ function createWriteStream(ctx) {
 
         point: channel,
 
-        write: function write$(data) {
+        write: function (data) {
             _write(data);
             return this;
         },
 
-        end: function end$() {
+        end: function () {
             _write();
             return channel;
         }
     };
+}
+
+function shouldIgnore(message) {
+    return message.session && message.session.closed;
 }
 
 function Queue(pipe) {
@@ -648,7 +680,7 @@ function Queue(pipe) {
 module.exports.Queue = Queue;
 
 Queue.prototype = {
-    size: function size$(context) {
+    size: function (context) {
         context = context || this.pipe.context;
         return context ? this.getQueue(context).length : 0;
     },

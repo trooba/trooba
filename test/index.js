@@ -1234,6 +1234,46 @@ describe(__filename, function () {
         .request({});
     });
 
+    it('should keep order in a stream', function (done) {
+        var _response;
+        var _data = [];
+
+        Trooba
+        .use(function good(pipe) {
+            pipe.on('response:data', function (data, next) {
+                next();
+            });
+        })
+        .use(function tr(pipe) {
+            pipe.on('request', function onRequest(request) {
+                var stream = pipe.streamResponse('pong');
+                stream.write('data1');
+                pipe.throw(new Error('Boom'));
+            });
+        })
+        .build()
+        .create()
+        .on('response', function (response, next) {
+            _response = response;
+            next();
+        })
+        .on('error', function (err) {
+            Assert.ok(err);
+            Assert.equal('Boom', err.message);
+            Assert.equal('pong', _response);
+            Assert.deepEqual(['data1'], _data);
+            done();
+        })
+        .on('response:data', function (data, next) {
+            _data.push(data);
+            next();
+        })
+        .on('response:end', function validateResponse() {
+            done(new Error('Should not happen'));
+        })
+        .request('ping');
+    });
+
     it('should execute generic API many times in parallel', function (done) {
         var match = 0;
         var maxInFlight = 0;

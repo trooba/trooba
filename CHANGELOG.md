@@ -1,5 +1,8 @@
 # ChangeLog
 
+## v2.1.2
+* Fix: Should keep the order in stream response when pipe.throw is activated
+
 ## v2.1.1
 * Fix: Trooba should restart the stream when request/response is restarted.
 * Fix: Should not fail when arrow function is used on use method, example:

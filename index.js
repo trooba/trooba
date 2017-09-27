@@ -434,10 +434,13 @@ PipePoint.prototype = {
     },
 
     throw: function (err) {
-        this.send({
-            type: 'error',
-            flow: Types.RESPONSE,
-            ref: err
+        var self = this;
+        defer(function () {
+            self.send({
+                type: 'error',
+                flow: Types.RESPONSE,
+                ref: err
+            });
         });
     },
 

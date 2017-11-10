@@ -18,7 +18,7 @@ describe.only(__filename, function () {
         });
 
         Assert.ok(pipe.factories);
-        var client = pipe.create();
+        var client = pipe.build().create();
         Assert.ok(client);
 
         // should create first pipe point
@@ -44,7 +44,7 @@ describe.only(__filename, function () {
         });
 
         Assert.ok(pipe.factories);
-        var client = pipe.create();
+        var client = pipe.build().create();
         Assert.ok(client);
 
         // should create first pipe point
@@ -56,6 +56,27 @@ describe.only(__filename, function () {
                 Assert.deepEqual(['one', 'two', 'three'], arr);
                 next();
             });
+        });
+    });
+
+    it('should re-use built pipe with different contexts', function (next) {
+        var arr = [];
+        var pipe = Trooba
+        .use(function one(pipe) {
+            arr.push('one');
+        })
+        .use(function two(pipe) {
+            arr.push('two');
+        })
+        .build();
+
+        // should create first pipe point
+        Assert.deepEqual([], arr);
+        pipe.create().send('request');
+        pipe.create().send('request');
+        setImmediate(function () {
+            Assert.deepEqual(['one', 'one', 'two', 'two'], arr);
+            next();
         });
     });
 
@@ -82,7 +103,7 @@ describe.only(__filename, function () {
         });
 
         Assert.ok(pipe.factories);
-        var client = pipe.create();
+        var client = pipe.build().create();
         Assert.ok(client);
 
         // should create first pipe point
@@ -104,7 +125,7 @@ describe.only(__filename, function () {
         .use(function three() {
         });
 
-        var client = pipe.create();
+        var client = pipe.build().create();
         client.trace(function (point) {
             arr.push(point.name);
         });
@@ -131,7 +152,7 @@ describe.only(__filename, function () {
         .use(function five() {
         });
 
-        var client = pipe.create();
+        var client = pipe.build().create();
         client.trace(function (point) {
             arr.push(point.name);
         });
@@ -154,6 +175,209 @@ describe.only(__filename, function () {
             ], arr);
             next();
         });
+    });
+
+    it('should decorate pipe instance', function (next) {
+        var arr = [];
+        Trooba
+        .use(function one(pipe) {
+            Assert.equal(undefined, pipe.one);
+            Assert.equal(undefined, pipe.two);
+            pipe.decorate('one', function () {
+                arr.push('one');
+            });
+            Assert.equal('function', typeof pipe.one);
+            pipe.decorate('two', function () {
+                arr.push('two');
+            });
+            Assert.equal('function', typeof pipe.two);
+        })
+        .use(function two(pipe) {
+            Assert.equal('function', typeof pipe.one);
+            Assert.equal('function', typeof pipe.two);
+            pipe.decorate('three', function () {
+                arr.push('three');
+            });
+        })
+        .use(function three(pipe) {
+            pipe.one();
+            pipe.two();
+            pipe.three();
+            Assert.deepEqual(['one', 'two', 'three'], arr);
+            next();
+        })
+        .build()
+        .create()
+        .send('request');
+    });
+
+    it('should fail to decorate with duplicate method', function (next) {
+        Trooba
+        .use(function one(pipe) {
+            pipe.decorate('one', function () {});
+            Assert.throws(function () {
+                pipe.decorate('one', function () {});
+            }, /The method "one" is already present/);
+            next();
+        })
+        .build()
+        .create()
+        .send('request');
+    });
+
+    it('should fail to decorate with duplicate from prototype', function (next) {
+        Trooba
+        .use(function one(pipe) {
+            Assert.throws(function () {
+                pipe.decorate('on', function () {});
+            }, /The method "on" is already present/);
+            next();
+        })
+        .build()
+        .create()
+        .send('request');
+    });
+
+    it('should define a custom interface', function (next) {
+        var handler = function one(pipe) {
+            next();
+        };
+
+        handler.interfaces = {
+            customApi: function (pipe, callback) {
+                return {
+                    hello: function () {
+                        return pipe.create().send('request');
+                    }
+                };
+            }
+        };
+
+        var client = Trooba
+        .use(handler)
+        .build()
+        .create('customApi');
+
+        client.hello();
+    });
+
+    it('should complain when a duplicate interface is added', function () {
+        Assert.throws(function () {
+            Trooba
+            .use({
+                interfaces: {
+                    customApi: function () {}
+                }
+            })
+            .use({
+                interfaces: {
+                    customApi: function () {}
+                }
+            });
+        }, /The implementation for "customApi" have already been registered/);
+    });
+
+    it('should decorate with request/response', function (next) {
+        Trooba
+        .use(require('../plugins/request-response'))
+        .use(function (pipe) {
+            pipe.on('request', function (request) {
+                Assert.equal('ping', request);
+                pipe.respond('pong');
+            });
+        })
+        .build()
+        .create()
+        .request('ping', function (err, response) {
+            Assert.ok(!err, err && err.stack);
+            Assert.equal('pong', response);
+            next();
+        });
+    });
+
+    it('should allow to catch events via "on" interceptors', function (next) {
+        var count = 0;
+        var resCount = 0;
+        var pipe = Trooba
+        .use(function (pipe) {
+            pipe.on('ping', function (request) {
+                Assert.equal(1, request);
+                resCount++;
+                pipe.send('pong', 2, 2);
+            });
+        })
+        .build()
+        .create();
+
+        pipe.send('ping', 1)
+        .on(next)
+        .on('pong', function (response) {
+            Assert.equal(2, response);
+            Assert.equal(2, response);
+            if (++count === 2) {
+                Assert.equal(2, resCount);
+                next();
+            }
+        });
+
+        pipe.send('ping', 1);
+    });
+
+    it('should catch events only "once"', function (next) {
+        var resCount = 0;
+        var pipe = Trooba
+        .use(function (pipe) {
+            pipe.once('ping', function (request) {
+                Assert.equal(1, request);
+                resCount++;
+                pipe.send('pong', 2, 2);
+            });
+        })
+        .build()
+        .create();
+
+        pipe.send('ping', 1)
+        .on(next)
+        .on('pong', function (response) {
+            Assert.equal(2, response);
+            Assert.equal(2, response);
+            setTimeout(function () {
+                Assert.equal(1, resCount);
+                next();
+            });
+        });
+
+        pipe.send('ping', 1);
+    });
+
+    it('should catch events only "once" on way back', function (next) {
+        var resCount = 0;
+        var count = 0;
+        var pipe = Trooba
+        .use(function (pipe) {
+            pipe.on('ping', function (request) {
+                Assert.equal(1, request);
+                resCount++;
+                pipe.send('pong', 2, 2);
+            });
+        })
+        .build()
+        .create();
+
+        pipe.send('ping', 1)
+        .on(next)
+        .once('pong', function (response) {
+            count++;
+            Assert.equal(2, response);
+            Assert.equal(2, response);
+            setTimeout(function () {
+                Assert.equal(2, resCount);
+                Assert.equal(1, count);
+                next();
+            });
+        });
+
+        pipe.send('ping', 1);
     });
 
     it.skip('should receive message', function () {});

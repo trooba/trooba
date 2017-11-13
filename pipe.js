@@ -31,15 +31,28 @@ Trooba.prototype.register = function (name, fn) {
     this.interfaces[name] = fn;
 };
 
-Trooba.prototype.use = function (createHandler, config) {
-    registerInterfaces(this, createHandler.interfaces);
-    createHandler.decorate && this.decorators.push(createHandler.decorate);
-    if (typeof createHandler === 'function') {
+Trooba.prototype.use = function (handler, config) {
+    registerInterfaces(this, handler.interfaces);
+    handler.decorate && this.decorators.push(handler.decorate);
+    if (typeof handler === 'function') {
         var create = function (pipe) {
-            if (createHandler.name) {
-                pipe.name = createHandler.name;
+            if (handler.name) {
+                pipe.name = handler.name;
             }
-            return createHandler(pipe, config);
+            var runtime;
+            if (handler.runtime !== 'generic') {
+                if (handler.runtime) {
+                    runtime = resolveRuntime(pipe, handler.runtime);
+                }
+                else {
+                    runtime = resolveRuntime(pipe, pipe.context.runtime, true);
+                }
+            }
+            if (runtime) {
+                runtime.call(pipe, handler);
+                return;
+            }
+            return handler(pipe, config);
         };
         this.factories.push(create);
     }
@@ -71,6 +84,14 @@ Trooba.prototype.build = function () {
     };
 };
 
+function resolveRuntime(pipe, name, silent) {
+    var runtime = pipe.runtimes[name];
+    if (!silent && !runtime) {
+        throw new Error('Cannot find runtime "'+name+'"');
+    }
+    return runtime;
+}
+
 function registerInterfaces(trooba, interfaces) {
     if (interfaces) {
         Object.keys(interfaces).forEach(function (name) {
@@ -84,15 +105,21 @@ function registerInterfaces(trooba, interfaces) {
     }
 }
 
+/*
+ * The method allows to create a special accessor that will lazily build
+ * a chain of handlers into a pipe
+*/
 function createActuator(factories, context) {
     factories = factories.slice();
     var points = [];
+    var runtimes = {};
 
     return function pointAt(position) {
         while (factories.length && position >= points.length) {
             var create = factories.shift();
             var point = new PipePoint(context);
             point.position = position;
+            point.runtimes = runtimes;
             if (position) {
                 // propagate values from previous point
                 point.decorators = points[position - 1].decorators;
@@ -238,7 +265,13 @@ PipePoint.prototype = {
             self.resume();
         };
 
-        fn(msg.data, next);
+        // some handler would like to handle whole messages
+        if (fn.acceptMessage) {
+            fn(msg);
+        }
+        else {
+            fn(msg.data, next);
+        }
 
         if (msg.oneway) {
             self.resume();
@@ -247,7 +280,7 @@ PipePoint.prototype = {
 
     on: function (type, handler) {
         if (this.handlers[type]) {
-            throw new Error('The hook has already been registered, you can use only one hook for specific event type: ' + type + ', point.id:' + this._id);
+            throw new Error('The hook has already been registered, you can use only one hook for specific event type: ' + type + ', point.id:' + (this._id || 'unknown'));
         }
         this.handlers[type] = handler;
         return this;

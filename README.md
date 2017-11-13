@@ -216,9 +216,65 @@ Example:
 }
 ```
 
+-------------
+
 ### Plugins
 
+-------------
+
 ### Decorators
+
+-------------
+
+### Runtime
+
+Runtime option allows to override default runtime template for handlers.
+
+For example, here's default very generic template for trooba in context of request/response flow as this is a most frequent flow used in web applications.
+
+```js
+function (pipe) {
+    pipe.on('request', (request, next) => {
+        next();
+    });
+
+    pipe.on('response', (response, next) => {
+        next();
+    });
+
+    pipe.on('error', (error, next) => {
+        next();
+    })
+}
+```
+
+Imagine one likes koa execution flow, then one can implement koa container which will define the template for handlers.
+
+_Note:_ that koa template is already provided by trooba as one of the plugins [here](https://github.com/trooba/trooba/plugins/koa).
+
+Now one can use async/await style as a handler
+
+```js
+async function (context, next) {
+    // read/modify request object
+    var request = context.request;
+    // now continue the flow
+    try {
+        await next();
+        // handle response
+        var response = context.response;
+    }
+    catch (err) {
+        console.error(err);
+        // continue error flow
+        throw err;
+    }
+}
+```
+
+#### Runtime Configuration API
+
+-------------
 
 ### Streaming support
 
@@ -282,6 +338,8 @@ pipe.create()
         next();
     });
 ```
+
+-------------
 
 ### Handler definition
 
@@ -516,6 +574,8 @@ pipe
 });
 ```
 
+-------------
+
 ### Tracing
 
 The framework allows to trace any and all messages.
@@ -570,6 +630,8 @@ Trooba
 });
 ```
 
+-------------
+
 ### Enforcing delivery
 
 To make sure a specific message type or request/response reach the destination, one can set validate options.
@@ -589,6 +651,8 @@ Trooba
 });
 ```
 
+-------------
+
 ### Transport
 
 Transport is a handler that should provide an actual implementation of the corresponding protocol (http/grpc/soap/rest). Usually the request flow would be terminated at transport point and the response flow is initiated.
@@ -600,6 +664,8 @@ For example:
 var service = pipe.build().create('service:hello');
 service.hello('John');
 ```
+
+-------------
 
 #### Transport usage
 
@@ -748,6 +814,8 @@ var client = Trooba.use(transportFactory(), {
 client.search('nike', console.log);
 ```
 
+-------------
+
 ## Examples
 
 ### Ajax client
@@ -773,6 +841,8 @@ require('trooba')
     });
 ```
 
+-------------
+
 ### RESTful client
 
 Based on [trooba-http-transport](https://github.com/trooba/trooba-http-transport)
@@ -796,6 +866,8 @@ require('trooba')
     });
 ```
 
+-------------
+
 ### gRPC client
 
 Based on [trooba-grpc-transport](https://github.com/trooba/trooba-grpc-transport)
@@ -816,6 +888,8 @@ require('trooba')
         console.log(err, response)
     });
 ```
+
+-------------
 
 ### gRPC service
 
@@ -872,6 +946,8 @@ var app = pipeServer.build('server:default');
 svr = app.listen();
 console.log('toorba service is listening on port:', port);
 ```
+
+-------------
 
 ### Mocking
 

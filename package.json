@@ -7,8 +7,9 @@
     "test": "test"
   },
   "scripts": {
-    "test": "./node_modules/.bin/mocha test/index test/readme test/index-4.x",
+    "test": "./node_modules/.bin/mocha test/pipe test/index test/readme test/index-4.x",
     "test-0.12": "./node_modules/.bin/mocha test/index test/readme",
+    "test-koa": "./node_modules/.bin/mocha test/koa",
     "test-coverage": "./node_modules/.bin/istanbul cover ./node_modules/mocha/bin/_mocha -- -R spec"
   },
   "repository": {

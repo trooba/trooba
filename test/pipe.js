@@ -3,7 +3,7 @@
 var Assert = require('assert');
 var Trooba = require('../pipe');
 
-describe.only(__filename, function () {
+describe(__filename, function () {
     it('should build simple pipe and send message', function (next) {
         var arr = [];
         var pipe = Trooba
@@ -295,6 +295,90 @@ describe.only(__filename, function () {
         });
     });
 
+    it('should do request/response with retry', function (next) {
+        var reqCounter = 0;
+        var resCounter = 0;
+
+        Trooba
+        .use(require('../plugins/request-response'))
+        .use(function (pipe) {
+            var retry = true;
+            var _request;
+            pipe.on('request', function (request, next) {
+                _request = request;
+                next();
+            });
+            pipe.on('response', function (response, next) {
+                resCounter++;
+                Assert.equal('ping', _request);
+                Assert.equal('pong', response);
+                if (retry) {
+                    retry = false;
+                    pipe.request(_request);
+                }
+                next();
+            });
+        })
+        .use(function (pipe) {
+            pipe.on('request', function (request) {
+                Assert.equal('ping', request);
+                reqCounter++;
+                pipe.respond('pong');
+            });
+        })
+        .build()
+        .create()
+        .request('ping', function (err, response) {
+            Assert.ok(!err, err && err.stack);
+            Assert.equal('pong', response);
+            Assert.equal(2, reqCounter);
+            Assert.equal(2, resCounter);
+            next();
+        });
+    });
+
+    it.skip('should do request/response and error during retry', function (next) {
+        var reqCounter = 0;
+        var resCounter = 0;
+
+        Trooba
+        .use(require('../plugins/request-response'))
+        .use(function (pipe) {
+            var retry = true;
+            var _request;
+            pipe.on('request', function (request, next) {
+                _request = request;
+                next();
+            });
+            pipe.on('response', function (response, next) {
+                resCounter++;
+                Assert.equal('ping', _request);
+                Assert.equal('pong', response);
+                if (retry) {
+                    retry = false;
+                    pipe.request(_request);
+                }
+                next();
+            });
+        })
+        .use(function (pipe) {
+            pipe.on('request', function (request) {
+                Assert.equal('ping', request);
+                reqCounter++;
+                pipe.respond('pong');
+            });
+        })
+        .build()
+        .create()
+        .request('ping', function (err, response) {
+            Assert.ok(!err, err && err.stack);
+            Assert.equal('pong', response);
+            Assert.equal(2, reqCounter);
+            Assert.equal(2, resCounter);
+            next();
+        });
+    });
+
     it('should allow to catch events via "on" interceptors', function (next) {
         var count = 0;
         var resCount = 0;
@@ -380,7 +464,13 @@ describe.only(__filename, function () {
         pipe.send('ping', 1);
     });
 
+    it('should decorate with complex path');
+
+    it.skip('should receive the whole message', function () {});
+
     it.skip('should receive message', function () {});
 
     it.skip('should skip message', function () {});
+
+    it.skip('should support mixed runtimes based on annotations', function () {});
 });

@@ -410,7 +410,7 @@ Trooba
 .request('ping', (err, response) => console.log);
 ```
 
-#### Configure default runtime
+#### Configuring default runtime
 
 One can customize default runtime engine to be used for handler that do not specify any runtime.
 

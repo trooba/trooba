@@ -410,6 +410,22 @@ Trooba
 .request('ping', (err, response) => console.log);
 ```
 
+#### Configure default runtime
+
+One can customize default runtime engine to be used for handler that do not specify any runtime.
+
+```js
+Trooba
+.use(koaHandler1)
+.use(koaHandler1)
+.use(annotate({runtime:'generic'}, genericHandler))
+.build()
+.create({
+    runtime: 'koa'
+})
+.request('ping', (err, response) => console.log);
+```
+
 #### Exporting runtime from handler
 
 In order to add new runtime to the supported runtimes, one can export it as part of plugin.

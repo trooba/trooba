@@ -291,7 +291,26 @@ One can also add it as part of plugin
 This is a little bit similar to decorators but allows to add new API without modifying the pipe object.
 
 ```js
+handler.interfaces = {
+    customApi: function (pipe, callback) {
+        return {
+            greetings: function (name) {
+                return pipe.create().send('name', name);
+            }
+        };
+    }
+};
 
+var client = Trooba
+.use(function (pipe) {
+    pipe.on('name', name => {
+        console.log(`Hello ${name}`);
+    });
+})
+.build()
+.create('greetings');
+
+client.hello('John');
 ```
 
 -------------

@@ -29,6 +29,7 @@ Trooba.prototype.register = function (name, fn) {
         throw new Error('The implementation for "' + name + '" have already been registered');
     }
     this.interfaces[name] = fn;
+    return this;
 };
 
 Trooba.prototype.use = function (handler, config) {

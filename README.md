@@ -224,22 +224,7 @@ The decorators API allows to add more behavior to the pipe.
 
 This is how request/response flow is added to the base pipe flow [here](https://github.com/trooba/trooba/plugins/request-response.js)
 
-```js
-var trooba = new Trooba();
-trooba.register('hello', name => {
-    console.log(`Hello ${name}`);
-})
-.use(pipe => {
-    pipe.on('request', (request, next) => {
-        pipe.hello();
-        next();
-    });
-});
-```
-
-#### Exporting decorators by handler
-
-It is much more convenient to export plugins as part of handler module.
+The decorator is exported by handler as shown below.
 
 ```js
 module.exports = function someHandler(pipe) {

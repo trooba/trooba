@@ -4,7 +4,7 @@
 var Assert = require('assert');
 var Trooba = require('../pipe');
 
-describe.only(__filename, () => {
+describe(__filename, () => {
 
     it('simple request', next => {
         Trooba

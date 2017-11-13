@@ -218,11 +218,11 @@ Example:
 
 -------------
 
-### Plugins
+### Decorators
 
-The plugin API allows to add more behavior via plugin.
+The decorators API allows to add more behavior to the pipe.
 
-#### Registering plugins directly
+This is how request/response flow is added to the base pipe flow [here](https://github.com/trooba/trooba/plugins/request-response.js)
 
 ```js
 var trooba = new Trooba();
@@ -237,7 +237,7 @@ trooba.register('hello', name => {
 });
 ```
 
-#### Exporting plugins by handler
+#### Exporting decorators by handler
 
 It is much more convenient to export plugins as part of handler module.
 
@@ -265,24 +265,6 @@ module.exports.decorate = function (pipe) {
     });
 }
 ```
-
--------------
-
-### Decorators
-
-The decorators API allows to add more functionality to the pipe point.
-
-This is how request/response flow is added to the base pipe flow [here](https://github.com/trooba/trooba/plugins/request-response.js)
-
-```js
-function handler(pipe) {
-    pipe.decorate('hello', name => {
-        console.log('Hello', name);
-    })
-}
-```
-
-One can also add it as part of plugin
 
 -------------
 
@@ -428,7 +410,7 @@ Trooba
 
 #### Exporting runtime from handler
 
-In order to add new runtime to the supported runtimes, one can export it as part of plugin.
+In order to add new runtime to the supported runtimes, one can export it as decorator.
 
 ```js
 module.exports = {
@@ -457,6 +439,16 @@ function handler(type, obj, next) {
         next();
     }
 }
+
+// use in real pipe now
+Trooba
+.use(myHandler1)
+.use(myHandler2)
+.build()
+.create({
+    runtime: 'myRuntime'
+})
+.request('ping', (err, response) => console.log);
 ```
 
 -------------

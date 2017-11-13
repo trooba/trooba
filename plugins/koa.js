@@ -1,3 +1,4 @@
+/*jslint esversion:6 */
 'use strict';
 
 module.exports = {
@@ -33,7 +34,7 @@ module.exports = {
                             pipe.request(context.request);
                         };
                     });
-                }
+                };
 
                 var ret;
                 try {

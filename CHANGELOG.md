@@ -1,24 +1,20 @@
 # ChangeLog
 
-## v2.1.2
-* Fix: Should keep the order in stream response when pipe.throw is activated
-
-## v2.1.1
-* Fix: Trooba should restart the stream when request/response is restarted.
-* Fix: Should not fail when arrow function is used on use method, example:
-```js
-Trooba.use(pipe => pipe.on('request', request => {}));
-```
-
-## v2.1.0
-* Added pipe.store to store properties specific to the given pipe point. This is useful to share things between different requests. One can store there objects that needs to be initialized only once.
-* Added support for nested pipes/handlers that can be retuned by some pipe handlers instead of hooking to the main flow.
+## Major version v3.0.0
+* Incompatible changes
+    * Linking pipes is now only supported by returning pipe from the handler.
+    * Trooba.create can only be called with one parameters, context for generic requests or api name to get a specific API implementation for the pipe.
+    * pipe.set and pipe.get are removed.
+* Complete refactoring into base pipe, plugins and decorators components.
+    * Now one can include basic components and cherry pick the other functionality if needed or implement their own runtime template for handlers.
+    * Decorators allow to add more functionality to the pipe object.
+    * Plugins can be used to export functionality from a specific handler to the pipeline.
 
 ## v2.0.2
 * Branding changes
 
 ## v2.0.1
-* Disabled resuming on stream.write call to avoid conflicts that may arise from auto-resume in bi-directional stream.
+* Disabled resuming on  stream.write call to avoid conflicts that may arise from auto-resume in bi-directional stream.
 * Refined the logic related to what happens with the message when the pipe point is resumed.
 * Added examples of request and response streaming.
 

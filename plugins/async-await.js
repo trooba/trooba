@@ -1,3 +1,4 @@
+/*jslint esversion:6 */
 'use strict';
 
 module.exports = {
@@ -22,6 +23,23 @@ module.exports = {
                 });
             });
             return pipe[type];
+        });
+
+        // let some handlers use koa via koa annotation
+        pipe.runtimes.asyncGeneric = function asyncGenericRuntime(fn) {
+            var pipe = this;
+            try {
+                var ret = fn(pipe);
+                if (ret instanceof Promise) {
+                    ret.catch(function (err) {
+                        pipe.throw(err);
+                    });
+                }
+            }
+            catch (err) {
+                // if this happens, it would be sync function flow
+                return pipe.throw(err);
+            }
         };
     }
 };
@@ -33,47 +51,3 @@ function once(fn) {
         return ret;
     };
 }
-
-async function (request) {
-    var response = await request.continue();
-
-    var reader = response.getReader();
-    do {
-        const data = reader.read();
-        console.log(data);
-    }
-    while(data)
-}
-
-async function (request) {
-    var reader = request.getReader();
-    const body = '';
-    while(true) {
-        const data = await reader.read();
-        if (!data) {
-            break;
-        }
-        body += data;
-    }
-    request.body = body;
-
-    var response = await request.continue();
-
-
-}
-
-function handler(context) {
-    var request = context.request;
-    await context.next();
-    var response = context.response;
-
-}
-pipe.handle({
-    request: function (request, next) {
-
-    },
-
-    response: function (response, next) {
-
-    }
-});

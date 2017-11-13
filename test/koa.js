@@ -203,7 +203,7 @@ describe.only(__filename, () => {
         function annotate(an, fn) {
             Object.assign(fn, an);
             return fn;
-        };
+        }
 
         var path = [];
         Trooba

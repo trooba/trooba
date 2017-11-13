@@ -220,9 +220,79 @@ Example:
 
 ### Plugins
 
+The plugin API allows to add more behavior via plugin.
+
+#### Registering plugins directly
+
+```js
+var trooba = new Trooba();
+trooba.register('hello', name => {
+    console.log(`Hello ${name}`);
+})
+.use(pipe => {
+    pipe.on('request', (request, next) => {
+        pipe.hello();
+        next();
+    });
+});
+```
+
+#### Exporting plugins by handler
+
+It is much more convenient to export plugins as part of handler module.
+
+```js
+module.exports = function someHandler(pipe) {
+    pipe.on('request', (request, next) => {
+        pipe.hello();
+        next();
+    });
+    pipe.on('response', (response, next) => {
+        pipe.bye();
+        next();
+    });
+};
+
+module.exports.decorate = function (pipe) {
+    pipe.decorate('hello', name => {
+        console.log(`Hello ${name}`);
+        // remember name for response flow bye action
+        this.username = name;
+    });
+
+    pipe.decorate('bye', () => {
+        console.log(`Bye ${this.username}`);
+    });
+}
+```
+
 -------------
 
 ### Decorators
+
+The decorators API allows to add more functionality to the pipe point.
+
+This is how request/response flow is added to the base pipe flow [here](https://github.com/trooba/trooba/plugins/request-response.js)
+
+```js
+function handler(pipe) {
+    pipe.decorate('hello', name => {
+        console.log('Hello', name);
+    })
+}
+```
+
+One can also add it as part of plugin
+
+-------------
+
+### Custom API
+
+This is a little bit similar to decorators but allows to add new API without modifying the pipe object.
+
+```js
+
+```
 
 -------------
 
@@ -230,10 +300,12 @@ Example:
 
 Runtime option allows to override default runtime template for handlers.
 
+#### Default template
+
 For example, here's default very generic template for trooba in context of request/response flow as this is a most frequent flow used in web applications.
 
 ```js
-function (pipe) {
+function genericHandler(pipe) {
     pipe.on('request', (request, next) => {
         next();
     });
@@ -248,14 +320,16 @@ function (pipe) {
 }
 ```
 
+#### Koa template
+
 Imagine one likes koa execution flow, then one can implement koa container which will define the template for handlers.
 
-_Note:_ that koa template is already provided by trooba as one of the plugins [here](https://github.com/trooba/trooba/plugins/koa).
+_Note:_ that koa template is already provided by trooba as one of the plugins [here](https://github.com/trooba/trooba/plugins/koa.js).
 
 Now one can use async/await style as a handler
 
 ```js
-async function (context, next) {
+async function koaHandler(context, next) {
     // read/modify request object
     var request = context.request;
     // now continue the flow
@@ -272,7 +346,83 @@ async function (context, next) {
 }
 ```
 
-#### Runtime Configuration API
+#### Generic Async/Await template
+
+This template allows to turn generic template into async/await style
+
+```js
+async function genericAsyncHandler(pipe) {
+    // wait for request
+    var {request, continueRequest} = await pipe.get('request');
+    // continue request flow`
+    continueRequest();
+    // wait for response
+    try {
+        var {response, continueResponse} = await pipe.get('response');
+        // continue response flow
+        continueResponse();        
+    }
+    catch (err) {
+        console.error(err);
+        // continue error flow
+        throw err;
+    }
+}
+```
+
+#### Mixing templates
+
+As a side effect one can mix different templates if it is really needed. This would allow easy transition from one template to the other without re-writing the code.
+
+Here's an example:
+
+```js
+// helper function to assign runtime engine to the handler
+function annotate(an, fn) {
+    Object.assign(fn, an);
+    return fn;
+}
+
+Trooba
+.use(annotate({runtime:'koa'}, koaHandler1))
+.use(annotate({runtime:'koa'}, koaHandler2))
+.use(genericHandler)
+.create()
+.request('ping', (err, response) => console.log);
+```
+
+#### Exporting runtime from handler
+
+In order to add new runtime to the supported runtimes, one can export it as part of plugin.
+
+```js
+module.exports = {
+    decorate: function (pipe) {
+        pipe.runtimes.myRuntime = function (handlerFn) {
+            pipe.on('request', (request, next) => {
+                handlerFn('requestObject', request, function (request) {
+                    // updated request
+                    next(request);
+                });
+            });
+            pipe.on('response', (response, next) => {
+                handlerFn('responseObject', response, function (response) {
+                    // updated request
+                    next(response);
+                });
+            });
+        };
+    }
+};
+
+// new handler to add body
+function handler(type, obj, next) {
+    if (type === 'requestObject') {
+        obj.body = 'Hello world';
+        next();
+    }
+}
+```
 
 -------------
 

@@ -381,13 +381,13 @@ In case one would like to stay flexible with engines, the handler can specify wh
 
 ```js
 // koaHandler.js
-module.exports = function (context, next) {
+module.exports = function koaHandler(context, next) {
     console.log('koa handler');
     next();
 };
 module.exports.runtime = 'koa';
 // genericHandler.js
-module.exports = function (pipe) {
+module.exports = function genericHandler(pipe) {
     pipe.on('request', (request, next) => {
         console.log('generic handler');
         next();
@@ -408,12 +408,23 @@ One can customize default runtime engine to be used for handler that do not spec
 
 ```js
 Trooba
-.use(koaHandler1)
-.use(koaHandler1)
-.use(annotate({runtime:'generic'}, genericHandler))
+.use(async (context, next) => {
+    console.log('koa handler 1');
+    await next();
+})
+.use(async (context, next) => {
+    console.log('koa handler 2');
+    await next();
+})
+.use(annotate({runtime:'generic'}, pipe => {
+    pipe.on('request', (request, next) => {
+        console.log('generic handler');
+        next();
+    });
+}))
 .build()
 .create({
-    runtime: 'koa'
+    runtime: 'koa' // <<< default runtime to be used for handler that do not specify otherwise.
 })
 .request('ping', (err, response) => console.log);
 ```

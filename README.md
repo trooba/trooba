@@ -377,6 +377,31 @@ Trooba
 .request('ping', (err, response) => console.log);
 ```
 
+In case one would like to stay flexible with engines, the handler can specify what engine it is designed to run on by exporting it as shown below.
+
+```js
+// koaHandler.js
+module.exports = function (context, next) {
+    console.log('koa handler');
+    next();
+};
+module.exports.runtime = 'koa';
+// genericHandler.js
+module.exports = function (pipe) {
+    pipe.on('request', (request, next) => {
+        console.log('generic handler');
+        next();
+    });
+};
+module.exports.runtime = 'generic';
+// index.js
+Trooba
+.use(koaHandler)
+.use(genericHandler)
+.create()
+.request('ping');
+```
+
 #### Configuring default runtime
 
 One can customize default runtime engine to be used for handler that do not specify any runtime.

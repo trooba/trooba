@@ -426,7 +426,7 @@ Trooba
 .create({
     runtime: 'koa' // <<< default runtime to be used for handler that do not specify otherwise.
 })
-.request('ping', (err, response) => console.log);
+.request('ping');
 ```
 
 #### Exporting runtime from handler

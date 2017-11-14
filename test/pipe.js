@@ -315,6 +315,7 @@ describe(__filename, function () {
                 if (retry) {
                     retry = false;
                     pipe.request(_request);
+                    return;
                 }
                 next();
             });
@@ -473,4 +474,381 @@ describe(__filename, function () {
     it.skip('should skip message', function () {});
 
     it.skip('should support mixed runtimes based on annotations', function () {});
+
+    it.skip('should send a series of messages and preserve their order', function () {});
+
+    it.skip('should send a series of oneway messages and preserve their order', function () {});
+
+    it.skip('should receive oneway message sooner then the rest', function () {});
+
+    describe('streaming', function () {
+        it('should do empty request stream', function (next) {
+            var events = [];
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.resume();
+                });
+
+                var buffer = [];
+
+                pipe.on('request:data', function (data, next) {
+                    if (data === undefined) {
+                        Assert.deepEqual([], buffer);
+                        pipe.respond('pong');
+                        return;
+                    }
+                    buffer.push(data);
+                    next();
+                });
+            })
+            .build()
+            .create()
+            .request('ping', function (err, response) {
+                Assert.ok(!err, err && err.stack);
+                Assert.equal('pong', response);
+                next();
+            })
+            .end();
+        });
+
+        it('should request stream with data in the end', function (next) {
+            var events = [];
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.resume();
+                });
+
+                var buffer = [];
+
+                pipe.on('request:data', function (data, next) {
+                    if (data === undefined) {
+                        Assert.deepEqual(['foo'], buffer);
+                        pipe.respond('pong');
+                        return;
+                    }
+                    buffer.push(data);
+                    next();
+                });
+            })
+            .build()
+            .create()
+            .request('ping', function (err, response) {
+                Assert.ok(!err, err && err.stack);
+                Assert.equal('pong', response);
+                next();
+            })
+            .end('foo');
+        });
+
+        it('should do simple request stream', function (next) {
+            var events = [];
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.resume();
+                });
+
+                var buffer = [];
+
+                pipe.on('request:data', function (data, next) {
+                    if (data === undefined) {
+                        Assert.deepEqual(['foo', 'bar'], buffer);
+                        pipe.respond('pong');
+                        return;
+                    }
+                    buffer.push(data);
+                    next();
+                });
+            })
+            .build()
+            .create()
+            .request('ping', function (err, response) {
+                Assert.ok(!err, err && err.stack);
+                Assert.equal('pong', response);
+                next();
+            })
+            .write('foo')
+            .write('bar')
+            .end();
+        });
+
+        it('should do complex request stream', function (next) {
+            var events = [];
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('request:' + request);
+                    next();
+                });
+                pipe.on('response', function (response, next) {
+                    events.push('response:' + response);
+                    next();
+                });
+            })
+            .use(function (pipe) {
+                pipe.on('request:data', function (data, next) {
+                    events.push('request:data:' + data);
+                    next();
+                });
+            })
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.resume();
+                });
+
+                var buffer = [];
+
+                pipe.on('request:data', function (data, next) {
+                    if (data === undefined) {
+                        Assert.deepEqual([
+                            'request:ping',
+                            'request:data:foo',
+                            'request:data:bar',
+                            'request:data:undefined',
+                            'transport:ping'
+                        ], events);
+                        Assert.deepEqual(['foo', 'bar'], buffer);
+                        pipe.respond('pong');
+                        return;
+                    }
+                    buffer.push(data);
+                    next();
+                });
+            })
+            .build()
+            .create()
+            .request('ping', function (err, response) {
+                Assert.ok(!err, err && err.stack);
+                Assert.equal('pong', response);
+                next();
+            })
+            .write('foo')
+            .write('bar')
+            .end();
+        });
+
+        it('should do empty response stream', function (done) {
+            var events = [];
+            var buffer = [];
+            var _response;
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.respond('pong')
+                    .end();
+                });
+            })
+            .build()
+            .create()
+            .request('ping')
+            .on('response', function (response, next) {
+                _response = response;
+                next();
+            })
+            .on('response:data', function (data, next) {
+                if (data === undefined) {
+                    Assert.deepEqual([], buffer);
+                    Assert.equal('pong', _response);
+                    done();
+                    return;
+                }
+                buffer.push(data);
+                next();
+            });
+        });
+
+        it('should do response stream with data in the end', function (done) {
+            var events = [];
+            var buffer = [];
+            var _response;
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.respond('pong')
+                    .end('foo');
+                });
+            })
+            .build()
+            .create()
+            .request('ping')
+            .on('response', function (response, next) {
+                _response = response;
+                next();
+            })
+            .on('response:data', function (data, next) {
+                if (data === undefined) {
+                    Assert.deepEqual(['foo'], buffer);
+                    Assert.equal('pong', _response);
+                    done();
+                    return;
+                }
+                buffer.push(data);
+                next();
+            });
+        });
+
+        it('should do simple response stream', function (done) {
+            var events = [];
+            var buffer = [];
+            var _response;
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.respond('pong')
+                    .write('foo')
+                    .write('bar')
+                    .end();
+                });
+            })
+            .build()
+            .create()
+            .request('ping')
+            .on('response', function (response, next) {
+                _response = response;
+                next();
+            })
+            .on('response:data', function (data, next) {
+                if (data === undefined) {
+                    Assert.deepEqual(['foo', 'bar'], buffer);
+                    Assert.equal('pong', _response);
+                    done();
+                    return;
+                }
+                buffer.push(data);
+                next();
+            });
+        });
+
+        it('should do complex response stream', function (done) {
+            var events = [];
+            var buffer = [];
+            var _response;
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('response', function (response, next) {
+                    events.push('response:' + response);
+                    next();
+                });
+                pipe.on('response:data', function (data, next) {
+                    events.push('response:data:' + data);
+                    next();
+                });
+            })
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.respond('pong')
+                    .write('foo')
+                    .write('bar')
+                    .end();
+                });
+            })
+            .build()
+            .create()
+            .request('ping')
+            .on('response', function (response, next) {
+                _response = response;
+                next();
+            })
+            .on('response:data', function (data, next) {
+                if (data === undefined) {
+                    Assert.deepEqual(['foo', 'bar'], buffer);
+                    Assert.deepEqual([
+                        'transport:ping',
+                        'response:pong',
+                        'response:data:foo',
+                        'response:data:bar',
+                        'response:data:undefined'
+                    ], events);
+                    Assert.equal('pong', _response);
+                    done();
+                    return;
+                }
+                buffer.push(data);
+                next();
+            });
+        });
+
+        it('should do request and response streams', function (done) {
+            var events = [];
+            var buffer = [];
+            var _response;
+
+            Trooba
+            .use(require('../plugins/request-response'))
+            .use(function (pipe) {
+                pipe.on('request', function (request, next) {
+                    events.push('transport:' + request);
+                    pipe.resume();
+                });
+
+                var buffer = [];
+
+                pipe.on('request:data', function (data, next) {
+                    if (data === undefined) {
+                        Assert.deepEqual(['foo', 'bar'], buffer);
+
+                        respond();
+
+                        return;
+                    }
+                    buffer.push(data);
+                    next();
+                });
+
+                function respond() {
+                    pipe.respond('pong')
+                    .write('foo')
+                    .write('bar')
+                    .end();
+                }
+            })
+            .build()
+            .create()
+            .request('ping')
+            .write('foo')
+            .write('bar')
+            .end()
+            .on('response', function (response, next) {
+                _response = response;
+                next();
+            })
+            .on('response:data', function (data, next) {
+                if (data === undefined) {
+                    Assert.deepEqual(['foo', 'bar'], buffer);
+                    Assert.equal('pong', _response);
+                    done();
+                    return;
+                }
+                buffer.push(data);
+                next();
+            });
+
+        });
+    });
 });

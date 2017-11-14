@@ -209,8 +209,6 @@ PipePoint.prototype = {
 
     resume: function () {
         var self = this;
-        // remove current from the queue
-        this.queue.shift();
         // next message
         defer(function () {
             self.process();
@@ -232,8 +230,8 @@ PipePoint.prototype = {
     },
 
     process: function () {
-        var self = this;
         var msg = this.queue.length && this.queue.shift();
+
         if (!msg) {
             return;
         }
@@ -261,9 +259,7 @@ PipePoint.prototype = {
         function skip() {} :
         function next(newData) {
             msg.data = newData || msg.data;
-
             msg.next();
-            self.resume();
         };
 
         // some handler would like to handle whole messages
@@ -275,7 +271,7 @@ PipePoint.prototype = {
         }
 
         if (msg.oneway) {
-            self.resume();
+            msg.next();
         }
     },
 
@@ -308,10 +304,14 @@ function Message(options) {
     this.position = options.position;
     this.direction = options.direction || Direction.RESPONSE;
     this.oneway = options.oneway || false;
+    this.session = options.session;
 }
 
 Message.prototype = {
     next: function () {
+        if (this.session && this.session.closed) {
+            return;
+        }
         this.direction === Direction.RESPONSE ? this.position-- : this.position++;
         var point = this.origin.pointAt(this.position);
         if (!point) {

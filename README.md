@@ -222,9 +222,9 @@ Example:
 
 The decorators API allows to add more behavior to the pipe.
 
-This is how request/response flow is added to the base pipe flow [here](https://github.com/trooba/trooba/plugins/request-response.js)
+This is how request/response artifacts are added to the base pipe flow [here](https://github.com/trooba/trooba/plugins/request-response.js)
 
-The decorator is exported by handler as shown below.
+The decorator can exported by handler as shown below with a config assigned via exporting handler/plugin
 
 ```js
 module.exports = function someHandler(pipe) {
@@ -238,16 +238,34 @@ module.exports = function someHandler(pipe) {
     });
 };
 
-module.exports.decorate = function (pipe) {
-    pipe.decorate('hello', name => {
-        console.log(`Hello ${name}`);
-        // remember name for response flow bye action
-        this.username = name;
+module.exports.decorate = function (pipe, config) {
+    pipe.decorate('hello', () => {
+        return function greeting(name) {
+            console.log(`Hello ${name}`);
+            // remember name for response flow bye action
+            this.username = name;
+        };
     });
 
-    pipe.decorate('bye', () => {
+    pipe.decorate('bye', () => () => {
         console.log(`Bye ${this.username}`);
     });
+}
+```
+
+_Note:_ __decorate__ function accepts name and factory for decorated function
+
+One can also override existing function with original passed as an argument to decorator factory
+
+In this example assuming we are overriding above decorated function
+```js
+module.exports.decorate = function (pipe, config) {
+    pipe.decorate('hello', original => {
+        return function respectfulGreeting(name) {
+            // modify the name
+            original.call(this, `Dear ${name}`);
+        };
+    }, true);
 }
 ```
 
@@ -259,7 +277,7 @@ This is a little bit similar to decorators but allows to add new API without mod
 
 ```js
 handler.interfaces = {
-    customApi: function (pipe, callback) {
+    customApi: function (pipe, config) {
         return {
             greetings: function (name) {
                 return pipe.create().send('name', name);

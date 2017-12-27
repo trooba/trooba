@@ -4,6 +4,7 @@ function Trooba() {
     this.factories = [];
     this.interfaces = {};
     this.decorators = [];
+    this.use(function head() {});
 }
 
 var Direction = {
@@ -20,30 +21,40 @@ module.exports = Trooba;
 
 module.exports.use = function (createHandler, config) {
     return new Trooba()
-    .use(function head() {})
     .use(createHandler, config);
 };
 
-Trooba.prototype.register = function (name, fn) {
+Trooba.prototype.register = function (name, fn, config) {
     if (this.interfaces[name]) {
         throw new Error('The implementation for "' + name + '" have already been registered');
     }
-    this.interfaces[name] = fn;
+    this.interfaces[name] = {
+        fn: fn,
+        config: config
+    };
     return this;
 };
 
 Trooba.prototype.use = function (handler, config) {
-    registerInterfaces(this, handler.interfaces);
-    handler.decorate && this.decorators.push(handler.decorate);
+    if (typeof handler === 'string') {
+        handler = require(handler);
+    }
+    var attributes = handler.attributes || {};
+    registerInterfaces(this, handler.interfaces, config);
+    handler.decorate && this.decorators.push({
+        decorate: handler.decorate,
+        config: config
+    });
+    var name = attributes.name || handler.name;
     if (typeof handler === 'function') {
         var create = function (pipe) {
-            if (handler.name) {
-                pipe.name = handler.name;
+            if (name) {
+                pipe.name = name;
             }
             var runtime;
-            if (handler.runtime !== 'generic') {
-                if (handler.runtime) {
-                    runtime = resolveRuntime(pipe, handler.runtime);
+            if (attributes.runtime !== 'generic') {
+                if (attributes.runtime) {
+                    runtime = resolveRuntime(pipe, attributes.runtime);
                 }
                 else {
                     runtime = resolveRuntime(pipe, pipe.context.runtime, true);
@@ -64,6 +75,12 @@ Trooba.prototype.build = function () {
     var trooba = this;
     var factories = this.factories;
     var interfaces = this.interfaces;
+    var store = {};
+
+    if (factories.length <= 1) {
+        throw new Error('No handlers have been registered');
+    }
+
     return {
         create: function (contextOrApi) {
             if (typeof contextOrApi === 'string') {
@@ -71,14 +88,14 @@ Trooba.prototype.build = function () {
                 if (!api) {
                     throw new Error('Cannot find requested API: ' + contextOrApi);
                 }
-                return api(this);
+                return api.fn(this, api.config);
             }
-            var pointAt = createActuator(factories, contextOrApi);
+            var pointAt = createActuator(factories, contextOrApi, store);
             var head = pointAt(0);
             head.pointAt = pointAt;
             head.factories = factories;
-            trooba.decorators.forEach(function (decorate) {
-                decorate(head);
+            trooba.decorators.forEach(function (decor) {
+                decor.decorate(head, decor.config);
             });
             return head;
         }
@@ -93,7 +110,7 @@ function resolveRuntime(pipe, name, silent) {
     return runtime;
 }
 
-function registerInterfaces(trooba, interfaces) {
+function registerInterfaces(trooba, interfaces, config) {
     if (interfaces) {
         Object.keys(interfaces).forEach(function (name) {
             var fn = interfaces[name];
@@ -101,7 +118,7 @@ function registerInterfaces(trooba, interfaces) {
                 throw new Error('The interface "' +
                     name + '" is not a function (pipe, callback)');
             }
-            trooba.register(name, fn);
+            trooba.register(name, fn, config);
         });
     }
 }
@@ -110,7 +127,7 @@ function registerInterfaces(trooba, interfaces) {
  * The method allows to create a special accessor that will lazily build
  * a chain of handlers into a pipe
 */
-function createActuator(factories, context) {
+function createActuator(factories, context, store) {
     factories = factories.slice();
     var points = [];
     var runtimes = {};
@@ -119,6 +136,7 @@ function createActuator(factories, context) {
         while (factories.length && position >= points.length) {
             var create = factories.shift();
             var point = new PipePoint(context);
+            point.store = store[position] = store[position] || {};
             point.position = position;
             point.runtimes = runtimes;
             if (position) {
@@ -156,15 +174,15 @@ function PipePoint(context) {
     this.decorators = undefined;
     this.queue = [];
     this.handlers = {};
-    this.store = {};
 }
 
 PipePoint.prototype = {
     Direction: Direction,
-    decorate: function (name, fn) {
-        if (name in this) {
+    decorate: function (name, fn, override) {
+        if (name in this && !override) {
             throw new Error('The method "' + name + '" is already present');
         }
+        fn = fn(this[name]);
         this[name] = fn;
         // remember decorators for the rest of points as we add them
         this.decorators = this.decorators || [];
@@ -176,6 +194,7 @@ PipePoint.prototype = {
     },
 
     throw: function (err) {
+        this.resume();
         this.send('error', err, Direction.RESPONSE);
     },
 
@@ -197,10 +216,11 @@ PipePoint.prototype = {
         new Message({
             type: options.type,
             data: options.data,
-            oneway: options.oneway,
+            sync: options.sync,
             direction: options.direction || Direction.REQUEST,
             origin: this,
-            position: this.position
+            position: this.position,
+            session: options.session
         })
         .next();
 
@@ -208,33 +228,51 @@ PipePoint.prototype = {
     },
 
     resume: function () {
-        var self = this;
+        this.current = undefined;
         // next message
-        defer(function () {
-            self.process();
-        });
+        this.throttleProcess();
     },
 
     add: function (msg) {
-        var self = this;
         // set position if not set
         this.position = this.position !== undefined ? this.position : msg.position;
         // set chain if not already set
         this.pointAt = this.pointAt || msg.origin.pointAt;
         // now check queue and decide
         this.queue.push(msg);
-        // process backlog
+
+        var prevPoint = this.pointAt(msg.relativePos(-1));
+        if (prevPoint.current === msg) {
+            prevPoint.resume();
+        }
+
+        this.throttleProcess();
+    },
+
+    throttleProcess: function () {
+        var self = this;
+        if (this._throttleProcessOn) {
+            return;
+        }
+        this._throttleProcessOn = true;
         defer(function () {
+            self._throttleProcessOn = false;
             self.process();
         });
     },
 
     process: function () {
-        var msg = this.queue.length && this.queue.shift();
+        if (this.current && this.current.position === this.position &&
+            !(this.current.session && this.current.session.closed)) {
+            return;
+        }
 
+        var msg = this.queue.length ? this.queue.shift() : undefined;
         if (!msg) {
             return;
         }
+
+        this.current = msg;
 
         if (msg.type === 'trace') {
             msg.data(this, msg.direction);
@@ -245,32 +283,34 @@ PipePoint.prototype = {
             return;
         }
 
-        var anyType = false;
         var fn = this.handlers[msg.type];
+        var acceptMessage = fn && fn.attributes && fn.attributes.acceptMessage;
         if (!fn) {
             fn = this.handlers['*'];
-            anyType = true;
+            acceptMessage = true;
         }
         if (!fn) {
             return msg.next();
         }
 
-        var next = msg.oneway ?
-        function skip() {} :
-        function next(newData) {
+        function skip() {}
+
+        var next = function (newData) {
             msg.data = newData || msg.data;
             msg.next();
         };
 
-        // some handler would like to handle whole messages
-        if (fn.acceptMessage) {
+        next = msg.sync ? skip : once(next);
+
+        // some handlers would like to handle whole messages
+        if (acceptMessage) {
             fn(msg);
         }
         else {
             fn(msg.data, next);
         }
 
-        if (msg.oneway) {
+        if (msg.sync) {
             msg.next();
         }
     },
@@ -303,31 +343,50 @@ function Message(options) {
     this.data = options.data;
     this.position = options.position;
     this.direction = options.direction || Direction.RESPONSE;
-    this.oneway = options.oneway || false;
+    this.sync = options.sync || false;
     this.session = options.session;
 }
 
 Message.prototype = {
+    /* position relative to current and message direction */
+    relativePos: function (delta) {
+        return this.direction === Direction.RESPONSE ? this.position - delta : this.position + delta;
+    },
+
     next: function () {
         if (this.session && this.session.closed) {
+            this.origin.pointAt(this.position).resume();
             return;
         }
-        this.direction === Direction.RESPONSE ? this.position-- : this.position++;
+        this.position = this.relativePos(+1);
         var point = this.origin.pointAt(this.position);
         if (!point) {
             if (this.type === 'error') {
                 throw this.data;
             }
+            point = this.origin.pointAt(this.relativePos(-1));
             if (this.origin.context.validate &&
             this.origin.context.validate[this.type]) {
-                point = this.origin.pointAt(this.position - 1);
                 var err = new Error('No target consumer found for message ' +
-                    this.type + ', ' + JSON.stringify(this.data));
-
+                    this.type + ':' + JSON.stringify(this.data));
+                // if this is a head of pipe, take 2 steps back
+                if (this.position === -1) {
+                    point = this.origin.pointAt(this.relativePos(-2));
+                }
                 point.throw(err);
+                return;
             }
+            point.resume();
             return;
         }
+
         point.add(this);
     }
 };
+
+function once(fn) {
+    return function once() {
+        fn.apply(null, arguments);
+        fn = function noop() {};
+    };
+}

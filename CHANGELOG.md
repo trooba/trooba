@@ -2,11 +2,33 @@
 
 ## Major version v3.0.0
 * Incompatible changes
-    * Linking pipes is now only supported by returning pipe from the handler.
-    * Trooba.create can only be called with one parameters, context for generic requests or api name to get a specific API implementation for the pipe.
+    * Linking pipes is now only supported by returning a pipe from the handler.
+    ```js
+    var pipe = Trooba
+    .use(function one() {
+        arr.push('one');
+    })
+    .use(function two() {
+        arr.push('two');
+    })
+    .use(function () {
+        return Trooba
+        .use(function three() {
+            arr.push('three');
+        })
+        .use(function four() {
+            arr.push('four');
+        });
+    })
+    .use(function five() {
+        arr.push('five');
+    });
+    ```
+    * Trooba.create can only be called with one parameter, context for generic requests or api name to get a specific API implementation for the pipe.
     * pipe.set and pipe.get are removed.
 * Complete refactoring into base pipe, plugins and decorators components.
     * Now one can include basic components and cherry pick the other functionality if needed or implement their own runtime template for handlers.
+        * request/response/stream are extracted into [trooba-request-response](https://github.com/trooba.trooba-request-response,git) plugin.
     * Decorators allow to add more functionality to the pipe object.
     * Plugins can be used to export functionality from a specific handler to the pipeline.
 

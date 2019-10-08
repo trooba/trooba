@@ -1,23 +1,15 @@
 language: node_js
 matrix:
   include:
-    - node_js: "0.12" # this is not strictly necessary
-      env:
-          - TARGET=test-0.12
-          - TESTS=test/index test/readme
-    - node_js: "4"
-      env:
-          - TARGET=test
-          - TESTS=test/index test/readme test/index.4.x
-    - node_js: "6"
-      env:
-          - TARGET=test
-          - TESTS=test/index test/readme test/index.4.x
-    - node_js: "7"
-      env:
-          - TARGET=test
-          - TESTS=test/index test/readme test/index.4.x
     - node_js: "8"
+      env:
+          - TARGET=test
+          - TESTS=test/index test/readme test/index.4.x
+    - node_js: "10"
+      env:
+          - TARGET=test
+          - TESTS=test/index test/readme test/index.4.x
+    - node_js: "12"
       env:
           - TARGET=test
           - TESTS=test/index test/readme test/index.4.x

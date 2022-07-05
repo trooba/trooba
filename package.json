@@ -1,6 +1,6 @@
 {
   "name": "trooba",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "description": "a simple pipe to build service client and backend frameworks",
   "main": "index.js",
   "directories": {

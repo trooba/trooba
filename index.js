@@ -2,10 +2,9 @@
 
 var TTL = Infinity;
 
-var defer = process && process.nextTick && process.nextTick.bind(process) ||
-    setImmediate || function defer(fn) {
-        setTimeout(fn, 0); // this is much slower then setImmediate or nextTick
-    };
+var defer = function defer(fn) {
+    Promise.resolve().then(fn);
+}
 
 function createPipeConnector(to) {
     return function pipeConnect(pipe) {
@@ -23,7 +22,7 @@ function Trooba() {
 Trooba.prototype = {
 
     use: function (handler, config) {
-        if (typeof handler === 'string') {
+        if (typeof handler === 'string' && typeof window === 'undefined') {
             handler = require(handler);
         }
 

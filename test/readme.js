@@ -86,18 +86,18 @@ describe(__filename, function () {
     });
 
     it('generic example, callback', function (done) {
-        var session = nock('http://www.google.com')
+        var session = nock('https://www.trooba-test.com')
             .get('/search?q=nike')
             .reply(200, 'some text');
 
-        var Http = require('http');
+        var Https = require('https');
 
         function transport(pipe, config) {
             pipe.on('request', function (request) {
-                var options = Object.create(config);
+                var options = JSON.parse(JSON.stringify(config));
                 options.path += '?' + Querystring.stringify(request);
-                // prepare request
-                var req = Http.request(options, function (res) {
+                // prepare 
+                var req = Https.request(options, function (res) {
                     var data = '';
                     res.setEncoding('utf8');
                     res.on('data', function (chunk) {
@@ -119,8 +119,8 @@ describe(__filename, function () {
         }
 
         Trooba.use(transport, {
-            protocol: 'http:',
-            hostname: 'www.google.com',
+            protocol: 'https:',
+            hostname: 'www.trooba-test.com',
             path: '/search'
         })
         .build()
@@ -128,10 +128,15 @@ describe(__filename, function () {
         .request({
             q: 'nike'
         }, function (err, response) {
-            session.done();
-            Assert.ok(!err);
-            Assert.equal(200, response.statusCode);
-            done();
+            try {
+                session.done();
+                Assert.ok(!err);
+                Assert.equal(200, response.statusCode);
+                done();
+            }
+            catch (err) {
+                done(err);
+            }
         });
     });
 
@@ -144,7 +149,7 @@ describe(__filename, function () {
 
         function transport(pipe, config) {
             pipe.on('request', function (request) {
-                var options = Object.create(config);
+                var options = JSON.parse(JSON.stringify(config));
                 options.path += '?' + Querystring.stringify(request);
                 // prepare request
                 var req = Http.request(options, function (res) {

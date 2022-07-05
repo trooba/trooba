@@ -10,3 +10,4 @@ examples
 .git
 .github
 yarn.lock
+package-lock.json
